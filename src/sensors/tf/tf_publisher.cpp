@@ -1,0 +1,207 @@
+#include "sensors/tf/tf_publisher.hpp"
+
+#include <utility>
+#include "config/json_config_utils.hpp"
+#include "common/json_utils.hpp"
+
+namespace hako::robots::sensor
+{
+namespace
+{
+struct WorldPose
+{
+    hako::robots::types::Position position {};
+    Quaternion orientation {};
+};
+
+Quaternion quat_from_mj(const mjtNum* q)
+{
+    Quaternion out {};
+    out.w = q[0];
+    out.x = q[1];
+    out.y = q[2];
+    out.z = q[3];
+    return out;
+}
+
+Quaternion quat_conjugate(const Quaternion& q)
+{
+    Quaternion out {};
+    out.w = q.w;
+    out.x = -q.x;
+    out.y = -q.y;
+    out.z = -q.z;
+    return out;
+}
+
+Quaternion quat_multiply(const Quaternion& a, const Quaternion& b)
+{
+    Quaternion out {};
+    out.w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z;
+    out.x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y;
+    out.y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x;
+    out.z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w;
+    return out;
+}
+
+hako::robots::types::Vector3 rotate_vector(const Quaternion& q, const hako::robots::types::Vector3& v)
+{
+    Quaternion vq {};
+    vq.w = 0.0;
+    vq.x = v.x;
+    vq.y = v.y;
+    vq.z = v.z;
+    const Quaternion qr = quat_multiply(quat_multiply(q, vq), quat_conjugate(q));
+    return {qr.x, qr.y, qr.z};
+}
+
+WorldPose get_world_pose(
+    hako::robots::physics::IWorld* world,
+    const std::shared_ptr<hako::robots::physics::IRigidBody>& body,
+    const std::string& body_name)
+{
+    WorldPose pose {};
+    pose.position = body->GetPosition();
+    const int body_id = mj_name2id(world->getModel(), mjOBJ_BODY, body_name.c_str());
+    if (body_id >= 0) {
+        pose.orientation = quat_from_mj(&world->getData()->xquat[4 * body_id]);
+    }
+    return pose;
+}
+}
+
+TfPublisher::TfPublisher(std::shared_ptr<hako::robots::physics::IWorld> world)
+    : world_(std::move(world))
+{
+}
+
+bool TfPublisher::LoadConfig(const std::string& config_path)
+{
+    common::json root;
+    if (!common::load_json_file(config_path, root)) {
+        return false;
+    }
+
+    config_ = TfConfig {};
+    const auto* spec = hako::robots::config::FindObject(root, "spec");
+    const auto& spec_root = (spec != nullptr) ? *spec : root;
+
+    config_.output.name = common::get_json_string(spec_root, "name", "tf");
+    config_.output.pdu_name = "tf";
+    config_.output.update_rate_hz = 50.0;
+    if (spec == nullptr) {
+        config_.output.pdu_name = common::get_json_string(root, "pdu_name", config_.output.pdu_name);
+        config_.output.update_rate_hz = common::get_json_number(root, "update_rate_hz", config_.output.update_rate_hz);
+    }
+    hako::robots::config::ReadPduConfig(root, config_.output.pdu_name, config_.output.update_rate_hz);
+
+    body_cache_.clear();
+    child_to_body_.clear();
+    config_.transforms.clear();
+    const auto* binding_root = hako::robots::config::FindMjcfBinding(root);
+    const common::json* binding_transforms = nullptr;
+    if (binding_root != nullptr &&
+        binding_root->contains("transforms") &&
+        binding_root->at("transforms").is_array())
+    {
+        binding_transforms = &binding_root->at("transforms");
+    }
+    if (spec_root.contains("transforms") && spec_root.at("transforms").is_array()) {
+        for (const auto& entry : spec_root.at("transforms")) {
+            binding::TransformBinding binding {};
+            binding.parent_frame_id = common::get_json_string(entry, "parent_frame_id", "");
+            binding.child_frame_id = common::get_json_string(entry, "child_frame_id", "");
+            binding.source_body = common::get_json_string(entry, "source_body", "");
+            if (binding_transforms != nullptr && binding_transforms->is_array()) {
+                for (const auto& binding_entry : *binding_transforms) {
+                    const auto child_frame_id = common::get_json_string(binding_entry, "child_frame_id", "");
+                    if (child_frame_id == binding.child_frame_id) {
+                        binding.source_body = common::get_json_string(
+                            binding_entry,
+                            "source_body",
+                            binding.source_body);
+                        break;
+                    }
+                }
+            }
+            config_.transforms.push_back(binding);
+            child_to_body_[binding.child_frame_id] = binding.source_body;
+            if (!binding.source_body.empty()) {
+                body_cache_[binding.source_body] = world_->getRigidBody(binding.source_body);
+            }
+        }
+    }
+
+    scheduler_.StartReady(GetUpdatePeriodSec());
+    return true;
+}
+
+const TfConfig& TfPublisher::GetConfig() const
+{
+    return config_;
+}
+
+void TfPublisher::Build(TfFrame& out)
+{
+    out.transforms.clear();
+
+    for (const auto& binding : config_.transforms) {
+        TransformFrame frame {};
+        frame.header.frame_id = binding.parent_frame_id;
+        frame.child_frame_id = binding.child_frame_id;
+
+        auto child_it = body_cache_.find(binding.source_body);
+        if (child_it == body_cache_.end()) {
+            continue;
+        }
+        const auto child_pose = get_world_pose(world_.get(), child_it->second, binding.source_body);
+
+        if (binding.parent_frame_id == "odom" || binding.parent_frame_id.empty()) {
+            frame.transform.position = child_pose.position;
+            frame.transform.orientation = child_pose.orientation;
+            out.transforms.push_back(std::move(frame));
+            continue;
+        }
+
+        auto parent_body_it = child_to_body_.find(binding.parent_frame_id);
+        if (parent_body_it == child_to_body_.end()) {
+            frame.transform.position = child_pose.position;
+            frame.transform.orientation = child_pose.orientation;
+            out.transforms.push_back(std::move(frame));
+            continue;
+        }
+
+        const auto parent_cache_it = body_cache_.find(parent_body_it->second);
+        if (parent_cache_it == body_cache_.end()) {
+            continue;
+        }
+        const auto parent_pose = get_world_pose(world_.get(), parent_cache_it->second, parent_body_it->second);
+
+        const Quaternion parent_inv = quat_conjugate(parent_pose.orientation);
+        hako::robots::types::Vector3 delta_world {
+            child_pose.position.x - parent_pose.position.x,
+            child_pose.position.y - parent_pose.position.y,
+            child_pose.position.z - parent_pose.position.z
+        };
+        const auto delta_local = rotate_vector(parent_inv, delta_world);
+        frame.transform.position = {delta_local.x, delta_local.y, delta_local.z};
+        frame.transform.orientation = quat_multiply(parent_inv, child_pose.orientation);
+        out.transforms.push_back(std::move(frame));
+    }
+}
+
+void TfPublisher::Reset()
+{
+    scheduler_.Reset();
+}
+
+double TfPublisher::GetUpdatePeriodSec() const
+{
+    return (config_.output.update_rate_hz > 0.0) ? (1.0 / config_.output.update_rate_hz) : 0.02;
+}
+
+bool TfPublisher::ShouldUpdate(double delta_sec)
+{
+    return scheduler_.ShouldUpdate(delta_sec, GetUpdatePeriodSec());
+}
+}

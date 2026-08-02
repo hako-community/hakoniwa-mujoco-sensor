@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hakoniwa.dev/schemas/a2-sensor-manifest.schema.json",
+  "title": "Hakoniwa A-2 sensor manifest",
+  "description": "Declares which mujoco-sensor sensors a robot (e.g. a drone) uses. Consumed by hakoniwa-mujoco-sensor SensorRuntime (include/runtime/sensor_runtime.hpp).",
+  "type": "object",
+  "required": ["components"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "pdu_robot": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Default PDU channel robot/owner for all components."
+    },
+    "env": {
+      "type": "string",
+      "description": "Optional env.xml reference (the runtime also accepts env via its constructor)."
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/component" }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "component": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "enum": ["sensor", "actuator", "state_output", "command_input"],
+          "description": "Only 'sensor' entries are instantiated by the A-2 runtime; others are skipped."
+        },
+        "type": {
+          "type": "string",
+          "description": "Sensor type key. Types known to the A-2 runtime: lidar_3d, lidar_2d, radar (unknown types are skipped)."
+        },
+        "pdu_name": { "type": "string", "minLength": 1 },
+        "pdu_robot": { "type": "string", "minLength": 1 },
+        "mount": { "$ref": "#/$defs/mount" },
+        "params": { "type": "object" },
+        "description": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "mount": {
+      "type": "object",
+      "description": "Sensor mounting relative to the robot body (offset rotated by base yaw; yaw added).",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" },
+        "yaw_deg": { "type": "number" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

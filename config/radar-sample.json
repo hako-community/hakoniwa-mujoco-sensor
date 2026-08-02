@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "name": "front_radar",
+    "frame_id": "front_radar_frame",
+    "Range": 30.0,
+    "HorizontalFOV": 30.0,
+    "VerticalFOV": 10.0,
+    "PointsPerSecond": 1500,
+    "NoiseSeed": 1,
+    "DistanceAccuracy": [
+      {
+        "Range": { "Min": 0.0, "Max": 30.0 },
+        "type": "independent",
+        "DistanceIndependentAccuracy": {
+          "StdDev": 0.10,
+          "NoiseDistribution": "Gaussian"
+        }
+      }
+    ]
+  },
+  "pdu_config": {
+    "pdu_name": "radar_scan",
+    "update_rate_hz": 10.0
+  }
+}

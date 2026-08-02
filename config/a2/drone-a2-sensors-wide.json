@@ -1,0 +1,73 @@
+{
+  "$schema": "./a2-sensor-manifest.schema.json",
+  "name": "drone_a2_sensors",
+  "description": "Wide-azimuth variant of the A-2 manifest, for the crossing and overtaking scenarios (S-2 / S-3). A 60 deg forward radar cannot see a 90 deg crossing target at all: on a collision course the bearing stays near +/-45 deg, outside the +/-30 deg FOV. The JRC/NEDO medium-UAV radar answered this with a 360 deg mechanical scan; the ray model here uses tan(hfov/2), so 150 deg (+/-75 deg) is the practical maximum. Point rate is raised to keep the angular density of returns comparable to the 60 deg baseline.",
+  "pdu_robot": "Drone",
+  "components": [
+    {
+      "id": "front_lidar",
+      "kind": "sensor",
+      "type": "lidar_3d",
+      "pdu_name": "lidar_points",
+      "mount": {
+        "x": 0.15,
+        "y": 0.0,
+        "z": 0.0,
+        "yaw_deg": 0.0
+      },
+      "params": {
+        "frame_id": "front_lidar_frame",
+        "channels": 15,
+        "rotations_per_second": 10,
+        "points_per_second": 54150,
+        "max_distance": 20.0,
+        "min_distance": 0.05,
+        "vertical_fov_lower_deg": -15.0,
+        "vertical_fov_upper_deg": 15.0,
+        "horizontal_fov_start_deg": -180.0,
+        "horizontal_fov_end_deg": 180.0
+      }
+    },
+    {
+      "id": "safety_scan",
+      "kind": "sensor",
+      "type": "lidar_2d",
+      "pdu_name": "scan",
+      "mount": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0,
+        "yaw_deg": 0.0
+      },
+      "params": {
+        "frame_id": "scan_frame",
+        "angle_min_deg": -180.0,
+        "angle_max_deg": 180.0,
+        "angle_increment_deg": 1.0,
+        "range_min": 0.05,
+        "range_max": 20.0,
+        "scan_frequency_hz": 10
+      }
+    },
+    {
+      "id": "front_radar",
+      "kind": "sensor",
+      "type": "radar",
+      "pdu_name": "radar_scan",
+      "mount": {
+        "x": 0.15,
+        "y": 0.0,
+        "z": 0.0,
+        "yaw_deg": 0.0
+      },
+      "params": {
+        "frame_id": "front_radar_frame",
+        "range": 20.0,
+        "horizontal_fov_deg": 150.0,
+        "vertical_fov_deg": 20.0,
+        "points_per_second": 6000,
+        "noise_seed": 1
+      }
+    }
+  ]
+}

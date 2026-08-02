@@ -1,0 +1,58 @@
+{
+  "$schema": "./a2-sensor-manifest.schema.json",
+  "name": "drone_a2_sensors",
+  "description": "Formal A-2 sensor manifest for the drone: selects mujoco-sensor sensors, with mounts and PDU channels matching the drone conventions.",
+  "pdu_robot": "Drone",
+  "components": [
+    {
+      "id": "front_lidar",
+      "kind": "sensor",
+      "type": "lidar_3d",
+      "pdu_name": "lidar_points",
+      "mount": { "x": 0.15, "y": 0.0, "z": 0.0, "yaw_deg": 0.0 },
+      "params": {
+        "frame_id": "front_lidar_frame",
+        "channels": 15,
+        "rotations_per_second": 10,
+        "points_per_second": 54150,
+        "max_distance": 20.0,
+        "min_distance": 0.05,
+        "vertical_fov_lower_deg": -15.0,
+        "vertical_fov_upper_deg": 15.0,
+        "horizontal_fov_start_deg": -180.0,
+        "horizontal_fov_end_deg": 180.0
+      }
+    },
+    {
+      "id": "safety_scan",
+      "kind": "sensor",
+      "type": "lidar_2d",
+      "pdu_name": "scan",
+      "mount": { "x": 0.0, "y": 0.0, "z": 0.0, "yaw_deg": 0.0 },
+      "params": {
+        "frame_id": "scan_frame",
+        "angle_min_deg": -180.0,
+        "angle_max_deg": 180.0,
+        "angle_increment_deg": 1.0,
+        "range_min": 0.05,
+        "range_max": 20.0,
+        "scan_frequency_hz": 10
+      }
+    },
+    {
+      "id": "front_radar",
+      "kind": "sensor",
+      "type": "radar",
+      "pdu_name": "radar_scan",
+      "mount": { "x": 0.15, "y": 0.0, "z": 0.0, "yaw_deg": 0.0 },
+      "params": {
+        "frame_id": "front_radar_frame",
+        "range": 20.0,
+        "horizontal_fov_deg": 60.0,
+        "vertical_fov_deg": 20.0,
+        "points_per_second": 1500,
+        "noise_seed": 1
+      }
+    }
+  ]
+}

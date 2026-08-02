@@ -1,0 +1,27 @@
+{
+  "$schema": "./a2-sensor-manifest.schema.json",
+  "name": "drone_m6_sensors",
+  "description": "M6 end-to-end manifest: a single forward 3D LiDAR (lidar_points) for obstacle detection + avoidance.",
+  "pdu_robot": "Drone",
+  "components": [
+    {
+      "id": "front_lidar",
+      "kind": "sensor",
+      "type": "lidar_3d",
+      "pdu_name": "lidar_points",
+      "mount": { "x": 0.0, "y": 0.0, "z": 0.0, "yaw_deg": 0.0 },
+      "params": {
+        "frame_id": "front_lidar_frame",
+        "channels": 15,
+        "rotations_per_second": 10,
+        "points_per_second": 54150,
+        "max_distance": 20.0,
+        "min_distance": 0.05,
+        "vertical_fov_lower_deg": -15.0,
+        "vertical_fov_upper_deg": 15.0,
+        "horizontal_fov_start_deg": -180.0,
+        "horizontal_fov_end_deg": 180.0
+      }
+    }
+  ]
+}

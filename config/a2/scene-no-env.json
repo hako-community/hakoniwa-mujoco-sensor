@@ -1,0 +1,6 @@
+{
+  "name": "godot_only_scene",
+  "description": "Pattern B: no env.xml for this scene -> geometry lives only in the Godot scene, so Godot self-senses (Default3DLiDARController) and publishes lidar_points.",
+  "env": "",
+  "manifest": "drone-a2-sensors.json"
+}
