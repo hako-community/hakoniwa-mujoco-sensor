@@ -33,6 +33,9 @@ endif()
 # Options
 # ---------------------------------------------------------------------------
 option(HAKO_SENSOR_BUILD_TESTS "Build sensor unit tests" ON)
+# カメラは GLFW / OpenGL を要求するため既定 OFF。
+# カメラを使わない利用者のビルドを壊さないこと（IMPL_PLAN §4.4 の受け入れ基準）。
+option(HAKO_SENSOR_BUILD_CAMERA "Build camera sensors (requires GLFW/OpenGL)" OFF)
 
 # MuJoCo headers are required to COMPILE the library (primitive_types.hpp and the
 # MuJoCo ray-caster backend include <mujoco/mujoco.h>). Linking libmujoco is the
@@ -80,7 +83,24 @@ message(STATUS "HAKO_PDU_TYPES_INCLUDE_DIR= ${HAKO_PDU_TYPES_INCLUDE_DIR}")
 # ---------------------------------------------------------------------------
 # Library
 # ---------------------------------------------------------------------------
+set(_camera_srcs "")
+if(HAKO_SENSOR_BUILD_CAMERA)
+    find_package(OpenGL REQUIRED)
+    find_package(glfw3 REQUIRED)
+    set(_camera_srcs
+        src/sensors/camera/camera_config_loader.cpp
+        src/sensors/camera/camera_encoding_utils.cpp
+        src/sensors/camera/camera_sensor.cpp
+        src/sensors/camera/depth_camera_sensor.cpp
+        src/sensors/camera/rgbd_camera_sensor.cpp
+        src/sensors/camera/stereo_camera_sensor.cpp
+        src/sensors/camera/mujoco_camera_renderer.cpp
+        src/sensors/camera/image_frame_writer.cpp
+    )
+endif()
+
 add_library(hako_mujoco_sensor STATIC
+    ${_camera_srcs}
     src/sensors/backend/mujoco_ray_caster.cpp
     src/sensors/radar/radar_sensor.cpp
     src/sensors/lidar/lidar_2d_sensor.cpp
@@ -96,6 +116,8 @@ add_library(hako_mujoco_sensor STATIC
 )
 target_compile_features(hako_mujoco_sensor PUBLIC cxx_std_20)
 
+# src/ は非公開ヘッダ（camera_encoding_utils.hpp 等）の解決用
+target_include_directories(hako_mujoco_sensor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(hako_mujoco_sensor PUBLIC
     ${HAKO_MUJOCO_RUNTIME_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include
