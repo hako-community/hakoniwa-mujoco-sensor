@@ -157,7 +157,8 @@ Godot からの使用例は `examples/godot/`（**サンプル止まり**、godo
 
 ## ライセンス
 
-**[PolyForm Noncommercial License 1.0.0](./LICENSE)** — 利用は非営利目的に限ります。
+**[PolyForm Noncommercial License 1.0.0](./LICENSE)**（licensor: **hakoniwa community**）
+— 利用は非営利目的に限ります。
 商用利用については別途ご相談ください。
 
 上表の第三者成果物はそれぞれの元ライセンスに従います（本ライセンスは上書きしません）。
