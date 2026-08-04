@@ -12,7 +12,18 @@ REPO="$(cd "$HERE/.." && pwd)"
 
 MUJOCO_ROOT="${MUJOCO_ROOT:-$REPO/../hakoniwa-mujoco-robots/src/cmake-build/_deps/mujoco_precompiled-src}"
 MJ_INC="$MUJOCO_ROOT/include"
-NLOHMANN_DIR="${NLOHMANN_DIR:-$REPO/../hakoniwa-mujoco-robots/thirdparty/nolman/single_include}"
+# nlohmann/json の場所。NLOHMANN_DIR で明示指定するのが基本で、未指定のときだけ下の順で探す。
+#   1) 親リポの third_party/ に submodule として並んでいる場合（hakoniwa-humanoid の構成）
+#   2) システムに入っている場合（nlohmann-json3-dev など）
+find_nlohmann() {
+    for c in "$REPO/../nlohmann-json/single_include" \
+             "$REPO/../../third_party/nlohmann-json/single_include" \
+             "/usr/local/include" "/usr/include"; do
+        if [ -f "$c/nlohmann/json.hpp" ]; then echo "$c"; return 0; fi
+    done
+    return 1
+}
+NLOHMANN_DIR="${NLOHMANN_DIR:-$(find_nlohmann)}"
 
 [ -f "$MJ_INC/mujoco/mujoco.h" ]      || { echo "ERROR: mujoco.h not found under $MJ_INC (set MUJOCO_ROOT)"; exit 2; }
 [ -f "$NLOHMANN_DIR/nlohmann/json.hpp" ] || { echo "ERROR: nlohmann/json.hpp not found under $NLOHMANN_DIR (set NLOHMANN_DIR)"; exit 2; }

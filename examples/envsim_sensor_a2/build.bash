@@ -58,7 +58,18 @@ g++ -std=c++20 -O2 -Wall -Wextra \
 echo "built: $OUT_PDU3D"
 
 # B-1: manifest-driven sensor runtime (needs nlohmann/json).
-NLOHMANN_DIR="${NLOHMANN_DIR:-$REPO/../hakoniwa-mujoco-robots/thirdparty/nolman/single_include}"
+# nlohmann/json の場所。NLOHMANN_DIR で明示指定するのが基本で、未指定のときだけ下の順で探す。
+#   1) 親リポの third_party/ に submodule として並んでいる場合（hakoniwa-humanoid の構成）
+#   2) システムに入っている場合（nlohmann-json3-dev など）
+find_nlohmann() {
+    for c in "$REPO/../nlohmann-json/single_include" \
+             "$REPO/../../third_party/nlohmann-json/single_include" \
+             "/usr/local/include" "/usr/include"; do
+        if [ -f "$c/nlohmann/json.hpp" ]; then echo "$c"; return 0; fi
+    done
+    return 1
+}
+NLOHMANN_DIR="${NLOHMANN_DIR:-$(find_nlohmann)}"
 if [ ! -f "$NLOHMANN_DIR/nlohmann/json.hpp" ]; then
     echo "WARN: nlohmann/json.hpp not found under $NLOHMANN_DIR -- skipping sensor_runtime_demo (set NLOHMANN_DIR)"
     exit 0

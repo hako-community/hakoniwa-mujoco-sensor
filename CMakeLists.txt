@@ -63,15 +63,26 @@ if(NOT MUJOCO_INCLUDE_DIR)
     endforeach()
 endif()
 
+# nlohmann/json の場所。-DNLOHMANN_JSON_INCLUDE_DIR で明示指定するのが基本で、
+# 未指定のときだけ下の順で探す。
+#   1) 親リポの third_party/ に submodule として並んでいる場合（hakoniwa-humanoid の構成）
+#   2) システムに入っている場合（Debian/Ubuntu の nlohmann-json3-dev など）
 if(NOT NLOHMANN_JSON_INCLUDE_DIR)
     foreach(_cand
-        "${CMAKE_CURRENT_SOURCE_DIR}/../hakoniwa-mujoco-robots/thirdparty/nolman/single_include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../nlohmann-json/single_include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/nlohmann-json/single_include"
+        "/usr/local/include"
         "/usr/include")
         if(EXISTS "${_cand}/nlohmann/json.hpp")
             set(NLOHMANN_JSON_INCLUDE_DIR "${_cand}")
             break()
         endif()
     endforeach()
+endif()
+if(NOT NLOHMANN_JSON_INCLUDE_DIR)
+    message(WARNING
+        "nlohmann/json.hpp が見つかりません。JSON 設定を読む機能はビルドできません。\n"
+        "  -DNLOHMANN_JSON_INCLUDE_DIR=<nlohmann/json.hpp のある include ディレクトリ> を指定してください。")
 endif()
 
 set(HAKO_PDU_TYPES_INCLUDE_DIR "${HAKONIWA_INSTALL_PREFIX}/include/hakoniwa/pdu")
