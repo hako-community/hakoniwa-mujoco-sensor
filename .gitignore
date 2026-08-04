@@ -7,3 +7,14 @@ __pycache__/
 
 # ローカル実験用（ドローン/DAA 由来の成果物。本ライブラリとは無関係なので追跡しない）
 localsim/
+
+# ビルド生成物（build.bash / capi/build.bash が作る実行ファイル・共有ライブラリ）
+capi/smoke_capi
+capi/libhako_mujoco_sensor_capi.so
+examples/envsim_sensor_a2/lidar_a2_demo
+examples/envsim_sensor_a2/lidar_a2_pdu
+examples/envsim_sensor_a2/lidar3d_a2_pdu
+examples/envsim_sensor_a2/sensor_runtime_demo
+examples/envsim_sensor_a2/sensing_switch_demo
+examples/envsim_sensor_a2/sensor_bridge_multi
+examples/envsim_sensor_a2/m6_sensor_bridge
