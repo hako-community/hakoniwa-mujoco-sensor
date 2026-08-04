@@ -1,5 +1,6 @@
 # hakoniwa-mujoco-sensor
 
+箱庭（[Hakoniwa](https://github.com/toppers/hakoniwa)）向けの **MuJoCo センサーライブラリ**。
 `hakoniwa-mujoco-robots` から **センサー実装を分離・集約**した、バックエンド非依存
 （Strategy C）のセンサーライブラリ。レイ/レンジ系センサー（LiDAR / Ultrasonic /
 **Radar(新規)**）は具体的な物理・描画エンジンに直接依存せず、`IRayCaster`
@@ -22,6 +23,14 @@ ISensor (sensor.hpp)
 
 センサーモデルは **PDU を知らない**（Frame を返すだけ）。PDU 化は `pdu/adapter`
 層が担当。これにより 1 つのモデルを複数バックエンド・複数 PDU 表現で再利用できる。
+
+**利用側の例**: [`hakoniwa-humanoid`](https://github.com/hako-community/hakoniwa-humanoid)
+（31-DoF ヒューマノイドの PLANT）が本ライブラリを submodule として link し、
+IMU / odometry / tf / joint_state / 足裏接触 / 力覚 / RGBD カメラ / バッテリを PDU へ流している。
+
+**新しいセンサーはこのリポジトリに実装する**（下位の
+[`hakoniwa-mujoco-runtime`](https://github.com/hako-community/hakoniwa-mujoco-runtime)
+は物理バックエンドと箱庭アセット基盤のみを持つ）。
 
 ## ディレクトリ
 
@@ -108,3 +117,47 @@ cd capi && bash build.bash   # -> libhako_mujoco_sensor_capi.so (+ smoke_capi)
 Godot からの使用例は `examples/godot/`（**サンプル止まり**、godot-drone にはコミットしない）を参照。
 設計/検証の詳細は `devai/arch/phase2_api_layer_plan_20260701.md` と
 `devai/phase2_api_layer_impl_report_20260704.md`。
+
+
+---
+
+## 提供センサー（2026-08 時点）
+
+| センサー | 主な出力 / PDU 型 | 備考 |
+|---|---|---|
+| `joint_state` | `sensor_msgs/JointState` | MJCF の関節束を name/position/velocity で束ねる |
+| `imu`（`ImuSensor` / `MjcfImuSensor`） | `sensor_msgs/Imu` | **`MjcfImuSensor` は MJCF の `framequat`/`gyro`/`accelerometer` 直読み**。`ImuSensor` は加速度を body 速度差分で作るため重力が入らない点に注意 |
+| `odometry` | `nav_msgs/Odometry` | |
+| `tf` | `tf2_msgs/TFMessage` | |
+| `contact` | `std_msgs/Bool` + 接触力 | MJCF の `touch` センサ |
+| `force_torque` | `geometry_msgs/WrenchStamped` | |
+| `camera`（RGBD） | `sensor_msgs/{Image,CameraInfo}` | `HAKO_SENSOR_BUILD_CAMERA=ON` のときのみ（GLFW/OpenGL 依存） |
+| `battery` | `hako_msgs/HakoBatteryStatus` | 関節トルク由来の電流積算 + 放電曲線 |
+| `lidar` / `ultrasonic` / `radar` | 距離・点群 | `IRayCaster` 抽象越し（MuJoCo / Godot 両対応） |
+
+---
+
+## 由来と第三者成果物
+
+本リポジトリは `hakoniwa-mujoco-robots` の再編（2026-08-02）で生まれた。取り込み元と扱いは次のとおり。
+
+| 対象 | 扱い |
+|---|---|
+| `hakoniwa-mujoco-robots` | センサー実装の移設元（同一著者） |
+| `hakoniwa-armpi` | `sensors/contact/` と `sensors/force_torque/` を昇格（同一著者・変更は namespace と include パスのみ） |
+| `hakoniwa-humanoid` | `MjcfImuSensor`（MJCF センサ直読み + ノイズ）を昇格 |
+| `hakoniwa-drone-pro`（`LicenseRef-hakoniwalab-NC`） | `battery_model.hpp` は**設計のみ参考**（電流ベースの容量積算 / 放電曲線の外部化）。**コードは 1 行も持ち込んでいない**。電流源はロータ電流ではなく関節トルク由来に置き換えている |
+| [nlohmann/json](https://github.com/nlohmann/json)（MIT） | ヘッダを include するのみ（同梱しない） |
+| [MuJoCo](https://github.com/google-deepmind/mujoco)（Apache-2.0） | ヘッダを include するのみ（同梱しない） |
+
+`localsim/` はドローン/DAA 由来のローカル実験用資材で、本ライブラリとは無関係のため
+**リポジトリには含めていない**（`.gitignore` 対象）。
+
+---
+
+## ライセンス
+
+**[PolyForm Noncommercial License 1.0.0](./LICENSE)** — 利用は非営利目的に限ります。
+商用利用については別途ご相談ください。
+
+上表の第三者成果物はそれぞれの元ライセンスに従います（本ライセンスは上書きしません）。
