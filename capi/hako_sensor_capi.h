@@ -63,6 +63,13 @@ hako_sensor_handle hako_sensor_create(
  * Run one scan.
  *   state[15]       : origin[3], forward[3], left[3], up[3], linear_velocity[3]
  *                     (all world frame; forward/left/up are unit basis vectors).
+ *                     linear_velocity is the velocity OF THE SENSOR ORIGIN, not
+ *                     of the vehicle carrying it: a sensor mounted r metres off
+ *                     the vehicle origin moves at v_vehicle + omega x r while
+ *                     the vehicle rotates, and Doppler needs the former. A
+ *                     consumer that differences the sensor node's own world
+ *                     position (as the Godot sample does) already has it; one
+ *                     that starts from a vehicle pose must add the term.
  *   dt_sec          : elapsed time since previous scan (drives the scheduler).
  *   out_points_xyzi : caller buffer, 4 floats per point (x,y,z,w).
  *   max_points      : capacity of out_points_xyzi in POINTS (not floats).

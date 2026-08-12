@@ -9,6 +9,7 @@
 
 #include <cstring>
 
+#include "hakoniwa/pdu/converter/common.hpp"
 #include "sensor_msgs/pdu_cpptype_PointCloud2.hpp"
 #include "sensors/lidar/lidar3d_sensor.hpp"
 
@@ -22,11 +23,9 @@ namespace hako::robots::pdu::converter::sensor_msgs
 
         HakoCpp_PointCloud2 out {};
         out.header.frame_id = frame.frame_id;
-        // Carry the scan timestamp through, as the radar converter does.
-        const double stamp = frame.stamp_sec;
-        out.header.stamp.sec = static_cast<Hako_int32>(stamp);
-        out.header.stamp.nanosec =
-            static_cast<Hako_uint32>((stamp - static_cast<double>(out.header.stamp.sec)) * 1e9);
+        // Carry the scan timestamp through. Shared helper so all five sensors
+        // round the sec/nanosec split identically.
+        out.header.stamp = ToHakoTime(frame.stamp_sec);
         out.is_bigendian = false;
         out.is_dense = true;
         out.height = frame.height;

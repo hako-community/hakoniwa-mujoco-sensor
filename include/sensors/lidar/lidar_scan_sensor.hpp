@@ -47,5 +47,6 @@ namespace hako::robots::sensor::lidar
         std::shared_ptr<backend::IRayCaster> ray_caster_;
         LidarScanConfig config_ {};
         common::UpdateScheduler scheduler_ {};
+        unsigned long scan_count_ {0UL};   // drives LaserScanFrame::stamp_sec
     };
 }

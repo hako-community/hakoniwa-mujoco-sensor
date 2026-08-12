@@ -1,6 +1,6 @@
-// M2 demo: A-2 sensing over an envsim-sensor generated world.
+// M2 demo: A-2 sensing over a simenv-data generated world.
 //
-// Loads env.xml (produced by hakoniwa-envsim-sensor) into a kinematic MuJoCo
+// Loads env.xml (produced by hakoniwa-simenv-data) into a kinematic MuJoCo
 // world, injects a FIXED sensor pose (no live PDU yet -- that is M3), runs the
 // backend-agnostic LidarScanSensor through MujocoRayCaster, and checks the
 // measured wall distances against the known simple_room geometry.
@@ -43,7 +43,7 @@ int main(int argc, char** argv)
 {
     const std::string xml =
         (argc > 1) ? argv[1]
-                   : "../../../hakoniwa-envsim-sensor/examples/simple_room/generated/env.xml";
+                   : "../../../hakoniwa-simenv-data/examples/sensor_envs/simple_room/generated/env.xml";
 
     char err[1000] = {0};
     mjModel* model = mj_loadXML(xml.c_str(), nullptr, err, sizeof(err));

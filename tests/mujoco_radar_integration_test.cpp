@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -26,14 +27,17 @@ namespace radar = hako::robots::sensor::radar;
 
 // Radar at origin (z=0.5) looking +x. Target box centred at x=5 on a slide
 // joint along x, so we can give it a world velocity via qvel.
+// nuser_geom + user on the target carries its radar cross-section: this is the
+// contract actors.py writes and MujocoRayCaster reads back.
 static const char* kMjcf = R"XML(
 <mujoco model="radar_test">
   <option gravity="0 0 0"/>
+  <size nuser_geom="1"/>
   <worldbody>
     <geom name="floor" type="plane" size="20 20 0.1" pos="0 0 0"/>
     <body name="target" pos="5 0 0.5">
       <joint name="slide_x" type="slide" axis="1 0 0"/>
-      <geom name="target_geom" type="box" size="0.5 0.5 0.5"/>
+      <geom name="target_geom" type="box" size="0.5 0.5 0.5" user="7.5"/>
     </body>
   </worldbody>
 </mujoco>
@@ -80,9 +84,15 @@ static double mean_velocity(const radar::RadarScanFrame& f)
 
 int main()
 {
-    // Write MJCF to a temp file (mj_loadXML needs a path).
-    const std::string path = "/tmp/claude-1000/-data-buildman-drone/b6db2b81-bf36-4fdb-8154-d37cdcc24aae/scratchpad/radar_scene.xml";
-    { std::ofstream o(path); o << kMjcf; }
+    // Write MJCF to a temp file (mj_loadXML needs a path). Must be resolved at
+    // run time: a baked-in absolute path makes the test unrunnable anywhere else.
+    const std::string path =
+        (std::filesystem::temp_directory_path() / "hako_radar_integration_scene.xml").string();
+    {
+        std::ofstream o(path);
+        if (!o) { std::printf("cannot write scene to %s\n", path.c_str()); return 2; }
+        o << kMjcf;
+    }
 
     char err[1000] = {0};
     mjModel* m = mj_loadXML(path.c_str(), nullptr, err, sizeof(err));
@@ -122,6 +132,72 @@ int main()
         sensor.Scan(radar_state(), f);
         check(!f.detections.empty(), "target detected");
         close_to(mean_velocity(f), 3.0, 0.4, "Doppler ~ +3 m/s (receding)");
+    }
+
+    std::printf("== case D: per-target RCS reaches the sensor ==\n");
+    {
+        // The value must survive the whole path: MJCF user= -> mjModel.geom_user
+        // -> MujocoRayCaster -> RayHit. A mock cannot prove this; only a real
+        // model compile can, and silently losing it is the failure mode (MuJoCo
+        // drops user data when nuser_geom is not declared).
+        d->qvel[dof] = 0.0;
+        mj_forward(m, d);
+        const backend::RayHit h = caster->Cast(Vector3(0, 0, 0.5), Vector3(1, 0, 0), 20.0);
+        check(h.hit, "ray hits the target");
+        close_to(h.target_rcs_m2, 7.5, 1e-9, "RCS from geom user= reaches RayHit");
+
+        // The floor carries no user value, so it must read as "unknown" rather
+        // than as an RCS of zero.
+        const backend::RayHit f = caster->Cast(Vector3(0, 0, 1.0), Vector3(0, 0, -1), 20.0);
+        check(f.hit, "ray hits the floor");
+        check(f.target_rcs_m2 < 0.0, "un-annotated geom reports unknown RCS");
+    }
+
+    std::printf("== case E: Doppler is the velocity of the HIT POINT ==\n");
+    {
+        // A body spinning about z whose surface is well off the rotation axis.
+        // Taking mj_objectVelocity's reference point verbatim gets this wrong:
+        // XBODY reports the (stationary) body origin, BODY reports the COM, and
+        // neither is the point the ray struck. Only the rigid-body transfer
+        // v_P = v_O + omega x (P - O) matches the analytic answer.
+        static const char* kSpin = R"XML(
+<mujoco model="spin">
+  <option gravity="0 0 0"/>
+  <worldbody>
+    <body name="arm" pos="0 0 0">
+      <joint name="hz" type="hinge" axis="0 0 1"/>
+      <geom name="pad" type="box" size="0.5 0.5 0.5" pos="5 0 0" mass="1"/>
+    </body>
+  </worldbody>
+</mujoco>
+)XML";
+        const std::string sp =
+            (std::filesystem::temp_directory_path() / "hako_radar_spin_scene.xml").string();
+        { std::ofstream o(sp); o << kSpin; }
+        char e2[1000] = {0};
+        mjModel* sm = mj_loadXML(sp.c_str(), nullptr, e2, sizeof(e2));
+        check(sm != nullptr, "spin scene loads");
+        if (sm != nullptr) {
+            mjData* sd = mj_makeData(sm);
+            const double omega = 2.0;          // rad/s about +z
+            sd->qvel[0] = omega;
+            mj_forward(sm, sd);
+
+            backend::MujocoRayCaster c2(sm, sd, std::string(""));
+            // Ray along +x hits the near face at x = 4.5, on the y = 0 plane.
+            const backend::RayHit h = c2.Cast(Vector3(0, 0, 0), Vector3(1, 0, 0), 20.0);
+            check(h.hit, "ray hits the spinning arm");
+            // v = omega x r, r = (4.5, 0, 0) -> v = (0, 9.0, 0)
+            close_to(h.target_velocity.x, 0.0, 1e-6, "hit-point velocity x");
+            close_to(h.target_velocity.y, omega * 4.5, 1e-6, "hit-point velocity y = omega * r");
+            close_to(h.target_velocity.z, 0.0, 1e-6, "hit-point velocity z");
+
+            // Radial component along the ray is ~0 here (motion is tangential),
+            // which is the physically meaningful statement: a target spinning
+            // about an axis through the sensor line-of-sight has no closing rate.
+            mj_deleteData(sd);
+            mj_deleteModel(sm);
+        }
     }
 
     std::printf("== case C: target stationary ==\n");

@@ -27,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEMO = os.path.join(HERE, "sensor_runtime_demo")
 MANIFEST = os.path.normpath(os.path.join(HERE, "../../config/a2/drone-a2-sensors.json"))
 ENV_XML = os.path.normpath(os.path.join(
-    HERE, "../../../hakoniwa-envsim-sensor/examples/simple_room/generated/env.xml"))
+    HERE, "../../../hakoniwa-simenv-data/examples/sensor_envs/simple_room/generated/env.xml"))
 POS = (0.0, 0.0, 1.0)   # drone at room centre
 fails = []
 

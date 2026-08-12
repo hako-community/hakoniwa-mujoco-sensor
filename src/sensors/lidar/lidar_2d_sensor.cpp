@@ -266,6 +266,10 @@ void LiDAR2DSensor::RebuildNoisePipeline()
 
 void LiDAR2DSensor::Scan(LaserScanFrame& out)
 {
+    // Stamped before any early return: a sensor that is running but currently
+    // sees nothing is alive, and must not look stalled.
+    out.stamp_sec = static_cast<double>(++scan_count_) * GetUpdatePeriodSec();
+
     auto* model = world_->getModel();
     auto* data = world_->getData();
     const int sensor_body_id = mj_name2id(model, mjOBJ_BODY, sensor_body_name_.c_str());

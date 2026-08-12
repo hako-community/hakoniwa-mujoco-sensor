@@ -141,6 +141,12 @@ int main(int argc, char** argv)
     bool have_prev = false;
     Vector3 self_vel{};
     const double vel_alpha = 0.3;   // low-pass: pos comes in quantized, raw diff is noisy
+    // #12: the yaw RATE, same finite difference on Drone/pos.angular.z. A radar
+    // mounted 0.15 m ahead of the body origin does not move at the body's
+    // velocity while the drone yaws -- it swings on that lever arm, and the
+    // runtime needs omega to add the term (see runtime::MakeState).
+    double prev_yaw = 0.0;
+    double yaw_rate = 0.0;
 
     while (g_run) {
         const auto t0 = std::chrono::steady_clock::now();
@@ -160,11 +166,21 @@ int main(int argc, char** argv)
                     self_vel = Vector3(self_vel.x + vel_alpha * (raw.x - self_vel.x),
                                        self_vel.y + vel_alpha * (raw.y - self_vel.y),
                                        self_vel.z + vel_alpha * (raw.z - self_vel.z));
+                    // Yaw is an angle: differencing it raw makes a drone crossing
+                    // +/-pi look like it spun at hundreds of rad/s for one frame.
+                    // Wrap the DIFFERENCE into (-pi, pi] first.
+                    double dyaw = base.yaw_rad - prev_yaw;
+                    while (dyaw > M_PI) dyaw -= 2.0 * M_PI;
+                    while (dyaw < -M_PI) dyaw += 2.0 * M_PI;
+                    const double raw_rate = dyaw / dt_s;
+                    yaw_rate += vel_alpha * (raw_rate - yaw_rate);
                 }
                 prev_pos = base.origin;
+                prev_yaw = base.yaw_rad;
                 prev_t = t0;
                 have_prev = true;
                 base.linear_velocity = self_vel;
+                base.angular_velocity = Vector3(0.0, 0.0, yaw_rate);
 
                 if (!actor_body.empty() && runtime.HasActor(actor_body)) {
                     Vector3 apos{}, avel{};
@@ -214,9 +230,10 @@ int main(int argc, char** argv)
                         long& fc = frames[name];
                         ++fc;
                         if (fc % 40 == 1) {
-                            std::printf("[multi] frame#%ld %s pos=(%.2f,%.2f,%.2f) vel=(%.2f,%.2f,%.2f) -> ch%d\n",
+                            std::printf("[multi] frame#%ld %s pos=(%.2f,%.2f,%.2f) vel=(%.2f,%.2f,%.2f) "
+                                        "yawrate=%.2f -> ch%d\n",
                                         fc, name.c_str(), tw.linear.x, tw.linear.y, tw.linear.z,
-                                        self_vel.x, self_vel.y, self_vel.z, it->second);
+                                        self_vel.x, self_vel.y, self_vel.z, yaw_rate, it->second);
                         }
                     }
                 };

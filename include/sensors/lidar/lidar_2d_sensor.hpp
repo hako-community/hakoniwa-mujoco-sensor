@@ -58,6 +58,11 @@ namespace hako::robots::sensor::lidar
     struct LaserScanFrame
     {
         std::string frame_id {"laser"};
+        // Scan timestamp, seconds since the sensor started. Without it a consumer
+        // cannot tell "the scene has not changed" from "the sensor has stopped":
+        // the payload is byte-identical in both cases. Advances once per scan, as
+        // radar and lidar3d already do.
+        double stamp_sec {0.0};
         float angle_min {0.0F};
         float angle_max {0.0F};
         float angle_increment {0.0F};
@@ -108,6 +113,8 @@ namespace hako::robots::sensor::lidar
             double degree_yaw) const;
         void ApplyBlindPadding(std::vector<float>& ranges) const;
         void RebuildNoisePipeline();
+
+        unsigned long scan_count_ {0UL};   // drives LaserScanFrame::stamp_sec
 
         std::shared_ptr<hako::robots::physics::IWorld> world_;
         std::shared_ptr<hako::robots::physics::IRigidBody> sensor_body_;

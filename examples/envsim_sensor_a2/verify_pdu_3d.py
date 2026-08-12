@@ -25,7 +25,7 @@ from hakoniwa_pdu.pdu_msgs.sensor_msgs.pdu_conv_PointCloud2 import pdu_to_py_Poi
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEMO = os.path.join(HERE, "lidar3d_a2_pdu")
 ENV_XML = os.path.normpath(os.path.join(
-    HERE, "../../../hakoniwa-envsim-sensor/examples/simple_room/generated/env.xml"))
+    HERE, "../../../hakoniwa-simenv-data/examples/sensor_envs/simple_room/generated/env.xml"))
 
 N_V, N_H = 17, 361          # channels, width (must match lidar3d_a2_pdu.cpp)
 POS = (0.0, 0.0, 1.0)

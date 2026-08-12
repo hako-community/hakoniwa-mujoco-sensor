@@ -3,7 +3,7 @@
 // M4: sensing-mode switch.
 //
 // The drone's sensor detection runs in one of two paths, chosen by whether an
-// environment geometry XML (from hakoniwa-envsim-sensor) exists for the scene:
+// environment geometry XML (from hakoniwa-simenv-data) exists for the scene:
 //
 //   Pattern A (env.xml present): hakoniwa-mujoco-sensor senses (mj_ray over
 //     env.xml) and publishes the sensor PDUs. Godot is a pure visualizer and

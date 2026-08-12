@@ -183,7 +183,17 @@ void RadarSensor::Scan(const backend::SensorState& state, RadarScanFrame& out)
 
         // Distance-dependent detection. Applied to the TRUE range, before noise,
         // and drawn from the same seeded generator so runs stay reproducible.
-        if (math::DetectionProbability(depth, config_.detection_reference_range,
+        //
+        // A target with its own RCS shifts the reference range by (sigma/sigma_ref)^(1/4),
+        // straight out of the radar equation: a more reflective surface stays
+        // detectable further out. Targets without an RCS keep the reference range,
+        // so scenes that do not annotate their geometry behave exactly as before.
+        double ref_range = config_.detection_reference_range;
+        if (hit.target_rcs_m2 > 0.0) {
+            ref_range = math::ScaleRangeByRcs(ref_range, hit.target_rcs_m2,
+                                              config_.reference_rcs_m2);
+        }
+        if (math::DetectionProbability(depth, ref_range,
                                        config_.detection_falloff_exp) < uni01(rng_)) {
             continue;
         }

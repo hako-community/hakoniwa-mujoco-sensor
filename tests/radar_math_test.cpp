@@ -51,8 +51,13 @@ public:
         h.point = Vector3(origin.x + dir.x * d_, origin.y + dir.y * d_, origin.z + dir.z * d_);
         h.target_velocity = v_;
         h.target_id = 1;
+        h.target_rcs_m2 = rcs;   // negative (default) = backend has no RCS
         return h;
     }
+
+    // Public so a test can vary only the RCS while holding geometry fixed.
+    double rcs {-1.0};
+
 private:
     double d_;
     Vector3 v_;
@@ -247,6 +252,83 @@ int main()
             }
         }
         check(same, "same seed => identical scan");
+    }
+
+    // --- radar equation (link budget -> reference range) --------------------
+    {
+        // Hand-worked reference point. Pt=1 W, G=0 dBi (isotropic, so G=1),
+        // lambda=1 m, sigma=1 m^2, Smin=1e-9 W:
+        //   Rmax = [ 1 / ((4pi)^3 * 1e-9) ] ^ (1/4)
+        const double four_pi_cubed = std::pow(4.0 * rmath::kPi, 3.0);
+        const double want = std::pow(1.0 / (four_pi_cubed * 1e-9), 0.25);
+        close_to(rmath::RadarEquationRange(1.0, 0.0, 1.0, 1.0, 1e-9), want, 1e-9,
+                 "radar equation matches the closed form");
+
+        // Incomplete budgets must return 0 so the caller keeps the direct parameter.
+        check(rmath::RadarEquationRange(0.0, 0.0, 1.0, 1.0, 1e-9) == 0.0, "no Pt => 0");
+        check(rmath::RadarEquationRange(1.0, 0.0, 0.0, 1.0, 1e-9) == 0.0, "no lambda => 0");
+        check(rmath::RadarEquationRange(1.0, 0.0, 1.0, 1.0, 0.0) == 0.0, "no Smin => 0");
+
+        // Gain enters squared: +3 dBi (x2 linear) on both tx and rx is x4 power,
+        // and range goes as the fourth root, so exactly x sqrt(2).
+        const double g0 = rmath::RadarEquationRange(1.0, 0.0, 1.0, 1.0, 1e-9);
+        const double g3 = rmath::RadarEquationRange(1.0, 3.0102999566, 1.0, 1.0, 1e-9);
+        close_to(g3 / g0, std::sqrt(2.0), 1e-6, "+3 dBi => range x sqrt(2)");
+
+        // 16x the RCS is 2x the range (fourth root).
+        const double s1 = rmath::RadarEquationRange(1.0, 0.0, 1.0, 1.0, 1e-9);
+        const double s16 = rmath::RadarEquationRange(1.0, 0.0, 1.0, 16.0, 1e-9);
+        close_to(s16 / s1, 2.0, 1e-9, "16x RCS => 2x range");
+    }
+
+    // --- per-target RCS scaling --------------------------------------------
+    {
+        close_to(rmath::ScaleRangeByRcs(10.0, 16.0, 1.0), 20.0, 1e-9,
+                 "16x RCS scales reference range x2");
+        close_to(rmath::ScaleRangeByRcs(10.0, 1.0, 1.0), 10.0, 1e-9,
+                 "RCS == reference leaves range unchanged");
+        close_to(rmath::ScaleRangeByRcs(10.0, 1.0, 16.0), 5.0, 1e-9,
+                 "target 16x weaker than reference => half the range");
+        // Degenerate inputs must not poison the range.
+        close_to(rmath::ScaleRangeByRcs(10.0, -1.0, 1.0), 10.0, 1e-9,
+                 "unknown RCS leaves range unchanged");
+        // Consistency with the equation itself: scaling the reference range by
+        // sigma must equal re-evaluating the whole budget at that sigma.
+        const double base = rmath::RadarEquationRange(1.0, 6.0, 0.0039, 1.0, 1e-12);
+        const double direct = rmath::RadarEquationRange(1.0, 6.0, 0.0039, 7.5, 1e-12);
+        close_to(rmath::ScaleRangeByRcs(base, 7.5, 1.0), direct, 1e-9,
+                 "scaling agrees with re-evaluating the budget");
+    }
+
+    // --- a more reflective target is detected further out -------------------
+    {
+        // Same geometry, same seed; only the RCS reported by the backend differs.
+        // The weak target must not produce more detections than the strong one.
+        radar::RadarConfig cfg {};
+        cfg.range = 40.0;
+        cfg.horizontal_fov_deg = 30.0;
+        cfg.vertical_fov_deg = 10.0;
+        cfg.points_per_second = 4000;
+        cfg.detection_reference_range = 5.0;   // well inside 30 m, so falloff bites
+        cfg.detection_falloff_exp = 2.0;
+        cfg.reference_rcs_m2 = 1.0;
+        cfg.noise_seed = 7;
+
+        auto count_at = [&](double rcs) {
+            auto caster = std::make_shared<SphereMockRayCaster>(30.0, Vector3(0, 0, 0));
+            caster->rcs = rcs;
+            radar::RadarSensor s(caster);
+            s.SetConfig(cfg);
+            radar::RadarScanFrame f {};
+            s.Scan(forward_state(), f);
+            return f.detections.size();
+        };
+
+        const size_t weak = count_at(0.01);   // radar-absorbent
+        const size_t ref = count_at(1.0);     // the reference target
+        const size_t strong = count_at(100.0); // corner-reflector-like
+        check(weak < ref, "low-RCS target yields fewer detections than the reference");
+        check(ref < strong, "high-RCS target yields more detections than the reference");
     }
 
     std::printf("\n%d/%d checks passed\n", g_checks - g_failures, g_checks);

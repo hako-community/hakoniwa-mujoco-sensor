@@ -2,7 +2,7 @@
 
 // Manifest-driven, backend-agnostic A-2 sensor runtime (B-1).
 //
-// Loads an envsim-sensor env.xml into a kinematic MuJoCo world, reads a sensor
+// Loads a simenv-data env.xml into a kinematic MuJoCo world, reads a sensor
 // manifest, creates the SELECTED sensors via a type->creator factory, and on
 // each Step() drives every sensor from the drone pose (BasePose) and emits its
 // PDU binary through a transport-agnostic sink.
@@ -27,6 +27,7 @@
 #include "sensors/lidar/lidar3d_sensor.hpp"
 #include "sensors/lidar/lidar_scan_sensor.hpp"
 #include "sensors/radar/radar_sensor.hpp"
+#include "sensors/radar/radar_math.hpp"   // RadarEquationRange (link budget -> ref range)
 
 // converters (frame -> HakoCpp) and registry serializers (cpp2pdu)
 #include "hakoniwa/pdu/converter/sensor_msgs/lidar_point_cloud.hpp"
@@ -47,7 +48,13 @@ namespace hako::robots::runtime
         double yaw_rad {0.0};
         // A-1: the sensor's own world velocity. Without it every Doppler reading is
         // the target's velocity alone, so a moving drone sees a static wall as 0 m/s.
+        // This is the velocity of the BODY origin; MakeState adds the mount's
+        // lever-arm term before handing it to a sensor.
         types::Vector3 linear_velocity {};
+        // The airframe's world angular velocity, rad/s. For a drone whose pose
+        // arrives as (position, yaw) this is (0, 0, yaw_rate). Zero is a valid
+        // value and reproduces the pre-#12 behaviour exactly.
+        types::Vector3 angular_velocity {};
     };
 
     // Per-sensor mounting relative to the drone body.
@@ -66,17 +73,30 @@ namespace hako::robots::runtime
         const double sb = std::sin(by);
         // mount offset is body-frame; rotate into world by base yaw
         backend::SensorState st {};
-        st.origin = types::Vector3(
-            base.origin.x + (cb * m.x - sb * m.y),
-            base.origin.y + (sb * m.x + cb * m.y),
-            base.origin.z + m.z);
+        const types::Vector3 r_mount(
+            cb * m.x - sb * m.y,
+            sb * m.x + cb * m.y,
+            m.z);
+        st.origin = base.origin + r_mount;
         const double yaw = by + m.yaw_deg * M_PI / 180.0;
         const double c = std::cos(yaw);
         const double s = std::sin(yaw);
         st.forward = types::Vector3(c, s, 0.0);
         st.left = types::Vector3(-s, c, 0.0);
         st.up = types::Vector3(0.0, 0.0, 1.0);
-        st.linear_velocity = base.linear_velocity;
+        // #12: the mount rides a lever arm. The pose PDU reports the velocity of
+        // the airframe origin, but the transceiver sits at r_mount from it, so a
+        // rotating drone moves the sensor at v_body + omega x r_mount. Dropping
+        // that term biases Doppler by the RADIAL part of omega x r_mount, which
+        // depends on where in the FOV the ray points: the stock front radar
+        // (x=0.15, 60 deg azimuth window) is worst at the sector edge, measuring
+        // 0.075 m/s of phantom velocity per rad/s of yaw and 0 dead ahead, since
+        // the lever-arm velocity is perpendicular to the boresight. A mount
+        // looking to the side takes the full |omega||r_mount|. This is the same
+        // rigid-body rule #11 applied at the target end -- other end, same fix.
+        st.angular_velocity = base.angular_velocity;
+        st.linear_velocity = backend::VelocityAtPoint(
+            base.linear_velocity, base.angular_velocity, r_mount);
         return st;
     }
 
@@ -264,6 +284,23 @@ namespace hako::robots::runtime
                     p.value("detection_reference_range", c.detection_reference_range);
                 c.detection_falloff_exp =
                     p.value("detection_falloff_exp", c.detection_falloff_exp);
+                // Radar equation. Given a complete link budget, sensitivity is
+                // expressed physically and detection_reference_range is DERIVED --
+                // it then acts as a fallback for manifests that predate this.
+                c.tx_power_w = p.value("tx_power_w", c.tx_power_w);
+                c.antenna_gain_dbi = p.value("antenna_gain_dbi", c.antenna_gain_dbi);
+                c.wavelength_m = p.value("wavelength_m", c.wavelength_m);
+                c.min_detectable_signal_w =
+                    p.value("min_detectable_signal_w", c.min_detectable_signal_w);
+                c.reference_rcs_m2 = p.value("reference_rcs_m2", c.reference_rcs_m2);
+                {
+                    const double derived = sensor::radar::math::RadarEquationRange(
+                        c.tx_power_w, c.antenna_gain_dbi, c.wavelength_m,
+                        c.reference_rcs_m2, c.min_detectable_signal_w);
+                    if (derived > 0.0) {
+                        c.detection_reference_range = derived;
+                    }
+                }
                 {
                     // Unknown names fall back to the default rather than failing the
                     // load: a manifest written for a newer build still runs here.

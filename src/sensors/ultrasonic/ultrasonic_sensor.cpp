@@ -368,6 +368,10 @@ bool UltrasonicSensor::ShouldUpdate(double delta_sec)
 
 void UltrasonicSensor::Measure(UltrasonicFrame& out)
 {
+    // Stamped before any early return, including the set_invalid() paths: an
+    // out-of-range or invalid reading still means the sensor is running.
+    out.stamp_sec = static_cast<double>(++scan_count_) * GetUpdatePeriodSec();
+
     auto* model = world_->getModel();
     auto* data = world_->getData();
 

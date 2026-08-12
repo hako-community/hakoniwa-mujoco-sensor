@@ -26,9 +26,9 @@ A_DEMO = os.path.join(HERE, "lidar3d_a2_pdu")
 GODOT = "/usr/local/bin/Godot_v4.6.3-stable_linux.x86_64"
 VIZ_PROJ = os.path.join(HERE, "godot_viz")
 ENV_XML = os.path.normpath(os.path.join(
-    HERE, "../../../hakoniwa-envsim-sensor/examples/simple_room/generated/env.xml"))
+    HERE, "../../../hakoniwa-simenv-data/examples/sensor_envs/simple_room/generated/env.xml"))
 ENV_TSCN = os.path.normpath(os.path.join(
-    HERE, "../../../hakoniwa-envsim-sensor/examples/simple_room/generated/env.tscn"))
+    HERE, "../../../hakoniwa-simenv-data/examples/sensor_envs/simple_room/generated/env.tscn"))
 POS = (0.0, 0.0, 1.0)
 
 

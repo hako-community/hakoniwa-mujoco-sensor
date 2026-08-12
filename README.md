@@ -47,6 +47,7 @@ IMU / odometry / tf / joint_state / 足裏接触 / 力覚 / RGBD カメラ / バ
 | `config/radar-sample.json` | Radar 設定サンプル |
 | **`capi/`** | **C-ABI 成果物**（`hako_sensor_capi.{h,cpp}` + smoke + build.bash）→ `libhako_mujoco_sensor_capi.so` |
 | **`examples/godot/`** | C-ABI を使う **Godot サンプル**（成果物ではない）。README 参照 |
+| **`drone_daasim/`** | **ドローン DAA（Detect And Avoid）シミュレーション一式**。本ライブラリの利用側デモ。下記参照 |
 
 ## ビルド
 
@@ -137,6 +138,131 @@ Godot からの使用例は `examples/godot/`（**サンプル止まり**、godo
 
 ---
 
+## drone_daasim — ドローン DAA シミュレーション
+
+`drone_daasim/` は本ライブラリの**利用側デモ**。レーダー / LiDAR で相手機を検知し、
+**衝突回避（DAA: Detect And Avoid）** まで行う end-to-end シミュレーション一式。
+
+ライブラリ本体（`include/` `src/`）とは独立していて、**本体のビルドには一切不要**。
+逆に本ライブラリが「実機の制御ループに入れて成立するか」を確認する回帰テストでもある。
+
+> 旧名 `localsim/`。2026-08-11 に改称し追跡対象にした（以前は `.gitignore` 対象で、
+> リポジトリの再クローン時に丸ごと消失する事故があったため）。
+
+### 構成
+
+```
+[1] drone-core 物理（master + conductor）  ... 2 機分の pos を配信、move 指令を受ける
+[2] sensor_bridge_multi × 2（本ライブラリ） ... 各機の pos を読み、相手機を free joint の
+                                              ACTOR として自分の運動学 MuJoCo 世界に注入し、
+                                              radar/lidar を PDU 配信
+[3] シナリオ（Python）                     ... 検知を読んで回避操舵、判定を出力
+[4] Godot（任意）                          ... 可視化
+```
+
+**物理世界に障害物は無い**。相手機の存在を知っているのは [2] のセンサーだけなので、
+「知覚 → 判断 → 駆動」が本物の閉ループになっている。
+
+### 前提
+
+| 依存 | 入手先 |
+|---|---|
+| MuJoCo 3.9.0（header + lib の**一致ペア**） | `<workspace>/.cache/deps/mujoco_bin-src`、または `MUJOCO_LIB_DIR` で指定 |
+| `hakoniwa-drone-core` | 兄弟ディレクトリ。`lnx/linux-main_hako_drone_service` がビルド済みであること |
+| `hakoniwa-simenv-data` | 兄弟ディレクトリ。環境ジオメトリ（`examples/sensor_envs/`）の供給元 |
+| 箱庭 core | `/usr/local/hakoniwa`（`bin/hako-cmd`, `share/hakoniwa/offset`） |
+| Python | pyenv 3.12.3（`hakopy`, `hakoniwa-pdu`） |
+| Godot mono + .NET8（可視化時のみ） | `GODOT_MONO`, `DOTNET_ROOT` |
+
+パスは全て `drone_daasim/env.sh` が解決し、同名の環境変数で上書きできる。
+
+```bash
+# センサーブリッジをビルド（初回のみ）
+bash examples/envsim_sensor_a2/multi_build.bash
+```
+
+### 使い方
+
+```bash
+# 1) スタックを起動（headless）。第1引数はセンシング世界の選択
+bash drone_daasim/two_drone_run.sh noground
+
+# 2) シナリオを実行
+python3 drone_daasim/two_drone_avoid.py      # S-1 正面衝突回避（RESULT: PASS を出力）
+
+# 3) 後片付け（必須）
+bash drone_daasim/cleanup.sh
+```
+
+**env モード**（`two_drone_run.sh` / `two_drone_viz_run.sh` 共通の第1／第5引数）:
+
+| モード | センシング世界 | 用途 |
+|---|---|---|
+| `noground`（既定） | 地面なし | レーダーが相手機のみを返す。回避デモが最も見やすい |
+| `ground` | 地面あり | 実機同様の静止クラッタが乗る（0.0 m/s の返りは全て地面） |
+| `room` | simple_room（床+4壁+柱） | 静止物 + 動体の混在（S-7） |
+| `crewed` | 有人機サイズの目標 | S-6 |
+
+> 既定が `noground` なのは、**壁を消すとレーダーが地面反射で埋まる**ため。実測で
+> `DETECTED: 4 object(s)` が全て 0.0 m/s の地面クラスタになり、肝心の相手機が埋没した。
+> Godot は地面を**描いたまま**、センシング世界からだけ外している
+> （`hakoniwa-simenv-data` の `actors.py --drop`）。
+
+### シナリオ
+
+| スクリプト | 内容 | 根拠 |
+|---|---|---|
+| `two_drone_avoid.py` | **S-1 正面衝突** — 両機が自機の右へ回避 | 施行規則 §182 |
+| `scenario_s2_converging.py` | S-2 90° 交差 | §181 / §186 |
+| `scenario_s3_overtaking.py` | S-3 追越 | §185 / §186 |
+| `scenario_s4_vertical.py` | S-4 垂直回避（上昇/降下） | ISO 15964 3.9 |
+| `scenario_s5_landing.py` | S-5 着陸機優先 | §183 / §184 |
+| `scenario_s6_crewed.py` | S-6 有人機との遭遇（UAS が必ず譲る） | NEDO DRESS/JRC 実証の縮尺再現 |
+| `scenario_s7_clutter.py` | S-7 静止物 + 動体の同時検知 | ISO 15964 4.6 |
+| `scenario_s8_failsafe.py` | S-8 センサー故障時のフェイルセーフ | ISO 15964 6.2.5, 4.2 d)-f) |
+| `scenario_b1_faceoff.py` | 相互検知 + 接近 Doppler の確認（回避なし） | — |
+
+判定は ISO 21384-3 の 6 ステップ（探知 → 認識 → 回避機動 → 結果確認 → 復帰 → 飛行）で出力し、
+最後に `RESULT: PASS` / `FAIL` を返す。
+
+### 可視化（Godot）
+
+```bash
+# 2機・衝突回避シーン（two_drone_avoid.tscn）
+bash drone_daasim/two_drone_viz_run.sh window radar oblique 1.0 noground
+python3 drone_daasim/two_drone_avoid.py      # 別シェルで重ねて実行
+
+# 1機・レーダースキャンシーン（sensor_viz.tscn。壁あり・検知3Dタグあり）
+bash drone_daasim/sensor_viz_run.sh window radar top
+```
+
+実行時キー: `L`=LiDAR / `R`=Radar / `N`=なし、`C`=カメラ切替、`+`/`-`=ズーム。
+
+センサー構成はマニフェストで差し替えられる（`config/a2/`）。機体ごとに別構成も可能:
+
+```bash
+# 前方60° + 後方セクターの混成で追越を見る
+A2_MANIFEST=$PWD/config/a2/drone-a2-sensors.json \
+A2_MANIFEST2=$PWD/config/a2/drone-a2-sensors-rear.json \
+  bash drone_daasim/two_drone_viz_run.sh window radar top 0.45 noground
+python3 drone_daasim/scenario_s3_overtaking.py
+```
+
+### 注意点
+
+- **起動・停止の順序が重要**。`hako-cmd` は master が生きていないと SHM セマフォで
+  **永久にブロック**し、SIGTERM も無視する。必ず `cleanup.sh` を使う
+  （`hako-cmd stop` → プロセス kill → `reset` → mmap 削除の順）。
+- **pdudef のチャネル構成を変えたら** `/var/lib/hakoniwa/mmap/*.bin` の削除が必須
+  （`reset` では消えない。古いサイズの mmap が残ると `data_size mismatch` になる）。
+- シナリオは**必ずクリーン起動の直後に**実行する。SIGTERM で殺したクライアントは
+  アセット解除されず、master の lockstep が固まる。
+- `demo/*.mp4`（デモ録画）は追跡していない。`demo_record.sh` で再生成できる。
+
+詳細は [`drone_daasim/README.md`](./drone_daasim/README.md)。
+
+---
+
 ## 由来と第三者成果物
 
 本リポジトリは `hakoniwa-mujoco-robots` の再編（2026-08-02）で生まれた。取り込み元と扱いは次のとおり。
@@ -150,8 +276,8 @@ Godot からの使用例は `examples/godot/`（**サンプル止まり**、godo
 | [nlohmann/json](https://github.com/nlohmann/json)（MIT） | ヘッダを include するのみ（同梱しない） |
 | [MuJoCo](https://github.com/google-deepmind/mujoco)（Apache-2.0） | ヘッダを include するのみ（同梱しない） |
 
-`localsim/` はドローン/DAA 由来のローカル実験用資材で、本ライブラリとは無関係のため
-**リポジトリには含めていない**（`.gitignore` 対象）。
+`drone_daasim/` はドローン DAA デモ一式（本ライブラリの**利用側**）。詳細は下記
+「[drone_daasim](#drone_daasim--ドローン-daa-シミュレーション)」節を参照。
 
 ---
 

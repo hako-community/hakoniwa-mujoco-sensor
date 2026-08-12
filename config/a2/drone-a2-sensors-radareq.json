@@ -1,0 +1,79 @@
+{
+  "$schema": "./a2-sensor-manifest.schema.json",
+  "name": "drone_a2_sensors",
+  "description": "Forward 60 deg radar whose sensitivity is given as a RADAR EQUATION link budget instead of a tuned distance. tx_power_w / antenna_gain_dbi / wavelength_m / min_detectable_signal_w are datasheet quantities; the runtime derives detection_reference_range from them via Rmax = [Pt*G^2*lambda^2*sigma / ((4pi)^3 * Smin)]^(1/4), so it need not be tuned by hand. These values (77 GHz, 10 mW, 25 dBi) yield Rmax = 6.00 m against the 1 m^2 reference target -- deliberately matching the hand-tuned detection_reference_range in drone-a2-sensors-rcs.json, so the two manifests are directly comparable. Note the scale: the same radar with a realistic -110 dBm receiver would reach 166 m; Smin is raised here because the DAA scenarios are a 1/10-scale re-creation. reference_rcs_m2 is also the baseline that a per-target RCS (geom user= via hakoniwa-simenv-data actors.py --rcs) is scaled from, as Rmax ~ sigma^(1/4).",
+  "pdu_robot": "Drone",
+  "components": [
+    {
+      "id": "front_lidar",
+      "kind": "sensor",
+      "type": "lidar_3d",
+      "pdu_name": "lidar_points",
+      "mount": {
+        "x": 0.15,
+        "y": 0.0,
+        "z": 0.0,
+        "yaw_deg": 0.0
+      },
+      "params": {
+        "frame_id": "front_lidar_frame",
+        "channels": 15,
+        "rotations_per_second": 10,
+        "points_per_second": 54150,
+        "max_distance": 20.0,
+        "min_distance": 0.05,
+        "vertical_fov_lower_deg": -15.0,
+        "vertical_fov_upper_deg": 15.0,
+        "horizontal_fov_start_deg": -180.0,
+        "horizontal_fov_end_deg": 180.0
+      }
+    },
+    {
+      "id": "safety_scan",
+      "kind": "sensor",
+      "type": "lidar_2d",
+      "pdu_name": "scan",
+      "mount": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0,
+        "yaw_deg": 0.0
+      },
+      "params": {
+        "frame_id": "scan_frame",
+        "angle_min_deg": -180.0,
+        "angle_max_deg": 180.0,
+        "angle_increment_deg": 1.0,
+        "range_min": 0.05,
+        "range_max": 20.0,
+        "scan_frequency_hz": 10
+      }
+    },
+    {
+      "id": "front_radar",
+      "kind": "sensor",
+      "type": "radar",
+      "pdu_name": "radar_scan",
+      "mount": {
+        "x": 0.15,
+        "y": 0.0,
+        "z": 0.0,
+        "yaw_deg": 0.0
+      },
+      "params": {
+        "frame_id": "front_radar_frame",
+        "range": 20.0,
+        "horizontal_fov_deg": 60.0,
+        "vertical_fov_deg": 20.0,
+        "points_per_second": 1500,
+        "noise_seed": 1,
+        "detection_falloff_exp": 2.0,
+        "tx_power_w": 0.01,
+        "antenna_gain_dbi": 25.0,
+        "wavelength_m": 0.003893,
+        "min_detectable_signal_w": 5.8942e-09,
+        "reference_rcs_m2": 1.0
+      }
+    }
+  ]
+}

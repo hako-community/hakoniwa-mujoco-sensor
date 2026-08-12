@@ -1,6 +1,6 @@
 {
   "name": "simple_room_with_env",
   "description": "Pattern A: an env.xml exists for this scene -> mujoco-sensor senses, Godot visualizes only.",
-  "env": "../../../hakoniwa-envsim-sensor/examples/simple_room/generated/env.xml",
+  "env": "../../../hakoniwa-simenv-data/examples/sensor_envs/simple_room/generated/env.xml",
   "manifest": "drone-a2-sensors.json"
 }

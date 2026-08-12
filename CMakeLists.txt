@@ -52,6 +52,27 @@ set(NLOHMANN_JSON_INCLUDE_DIR "" CACHE PATH "Directory containing nlohmann/json.
 # ---------------------------------------------------------------------------
 # Dependency discovery (best-effort, overridable)
 # ---------------------------------------------------------------------------
+# MuJoCo の場所。ヘッダと libmujoco.so は**必ず同じ root から組で**選ぶこと。
+# 版が食い違うと構造体レイアウトがずれ、ビルドは通って実行時に SEGV する
+# （実際に 3.10.0-dev ヘッダ + 3.9.0 ライブラリで mujoco_radar_integration_test と
+#  lidar_a2_demo が落ちた）。そこで探索順は
+#   1) include と lib が揃っている root（＝リリース tarball。multi_build.bash の
+#      find_mujoco_root と同じ考え方）
+#   2) ヘッダしか無い場所（未ビルドのソースチェックアウト等。コンパイルは通るので
+#      ライブラリを要らない利用者のために残すが、優先はしない）
+if(NOT MUJOCO_INCLUDE_DIR)
+    foreach(_root
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../.cache/deps/mujoco_bin-src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../.cache/deps/mujoco_bin-src"
+        "/usr/local"
+        "/opt/mujoco")
+        if(EXISTS "${_root}/include/mujoco/mujoco.h" AND EXISTS "${_root}/lib/libmujoco.so")
+            # lib は下の「ヘッダの隣を見る」ロジックが同じ root から拾う。
+            set(MUJOCO_INCLUDE_DIR "${_root}/include")
+            break()
+        endif()
+    endforeach()
+endif()
 if(NOT MUJOCO_INCLUDE_DIR)
     foreach(_cand
         "${CMAKE_CURRENT_SOURCE_DIR}/../../sensor/mujoco/include"
@@ -179,12 +200,56 @@ if(HAKO_SENSOR_BUILD_TESTS)
         src/sensors/noise/axis_noise.cpp
     )
     target_compile_features(radar_math_test PRIVATE cxx_std_20)
-    target_include_directories(radar_math_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(radar_math_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${HAKO_MUJOCO_RUNTIME_DIR}/include)
     target_include_directories(radar_math_test SYSTEM PRIVATE
         ${MUJOCO_INCLUDE_DIR}
         ${NLOHMANN_JSON_INCLUDE_DIR}
     )
     add_test(NAME radar_math_test COMMAND radar_math_test)
+
+    # Scan timestamps across the range sensors + their PDU headers.
+    # Needs the PDU type headers (it asserts on the converted messages).
+    if(EXISTS "${HAKO_PDU_TYPES_INCLUDE_DIR}/builtin_interfaces")
+        add_executable(sensor_stamp_test
+            tests/sensor_stamp_test.cpp
+            src/sensors/lidar/lidar_scan_sensor.cpp
+            src/sensors/noise/range_noise.cpp
+            src/sensors/noise/axis_noise.cpp
+        )
+        target_compile_features(sensor_stamp_test PRIVATE cxx_std_20)
+        target_include_directories(sensor_stamp_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${HAKO_MUJOCO_RUNTIME_DIR}/include)
+        target_include_directories(sensor_stamp_test SYSTEM PRIVATE
+            ${MUJOCO_INCLUDE_DIR} ${NLOHMANN_JSON_INCLUDE_DIR} ${HAKO_PDU_TYPES_INCLUDE_DIR})
+        add_test(NAME sensor_stamp_test COMMAND sensor_stamp_test)
+    else()
+        message(STATUS "PDU types missing -- skipping sensor_stamp_test")
+    endif()
+
+    # #12: the sensor's own angular velocity -> the mount's lever-arm term.
+    # Includes runtime/sensor_runtime.hpp for MakeState, which pulls the PDU
+    # converters, hence the same guard. MakeState is inline and no SensorRuntime
+    # is constructed, so nothing here links MuJoCo.
+    if(EXISTS "${HAKO_PDU_TYPES_INCLUDE_DIR}/builtin_interfaces")
+        add_executable(sensor_mount_velocity_test
+            tests/sensor_mount_velocity_test.cpp
+            src/sensors/radar/radar_sensor.cpp
+            src/sensors/noise/range_noise.cpp
+            src/sensors/noise/axis_noise.cpp
+        )
+        target_compile_features(sensor_mount_velocity_test PRIVATE cxx_std_20)
+        target_include_directories(sensor_mount_velocity_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${HAKO_MUJOCO_RUNTIME_DIR}/include)
+        target_include_directories(sensor_mount_velocity_test SYSTEM PRIVATE
+            ${MUJOCO_INCLUDE_DIR} ${NLOHMANN_JSON_INCLUDE_DIR} ${HAKO_PDU_TYPES_INCLUDE_DIR})
+        add_test(NAME sensor_mount_velocity_test COMMAND sensor_mount_velocity_test)
+    else()
+        message(STATUS "PDU types missing -- skipping sensor_mount_velocity_test")
+    endif()
 
     # C-ABI smoke: dummy ray caster -> both lidar3d and radar return points.
     # Backend-free (links only the .so), no MuJoCo/PDU/Godot.
@@ -204,6 +269,40 @@ if(HAKO_SENSOR_BUILD_TESTS)
         endif()
     endif()
     find_library(MUJOCO_LIBRARY NAMES mujoco PATHS "${MUJOCO_LIB_DIR}")
+
+    # ヘッダとライブラリの版が一致しているか検査する。
+    # 不一致でも**コンパイルもリンクも通ってしまい**、実行時に mjModel/mjData の
+    # レイアウト差で SEGV する。この環境には未ビルドの 3.10.0-dev ソースツリーと
+    # 3.9.0 のリリース版が同居しており、-DMUJOCO_LIB_DIR= だけ渡すと実際に踏む。
+    # 静かに落ちるくらいなら configure 時点で止める。
+    if(MUJOCO_LIBRARY AND EXISTS "${MUJOCO_INCLUDE_DIR}/mujoco/mujoco.h")
+        file(STRINGS "${MUJOCO_INCLUDE_DIR}/mujoco/mujoco.h" _mj_ver_line
+             REGEX "^#define +mjVERSION_HEADER +[0-9]+")
+        if(_mj_ver_line MATCHES "([0-9]+)$")
+            set(_mj_v "${CMAKE_MATCH_1}")
+            math(EXPR _mj_major "${_mj_v} / 1000000")
+            math(EXPR _mj_minor "(${_mj_v} / 1000) % 1000")
+            math(EXPR _mj_patch "${_mj_v} % 1000")
+            set(_mj_hdr_ver "${_mj_major}.${_mj_minor}.${_mj_patch}")
+            # 実体は libmujoco.so.<version> を指す symlink。
+            get_filename_component(_mj_real "${MUJOCO_LIBRARY}" REALPATH)
+            if(_mj_real MATCHES "libmujoco\\.so\\.([0-9]+\\.[0-9]+\\.[0-9]+)")
+                set(_mj_lib_ver "${CMAKE_MATCH_1}")
+                if(NOT _mj_hdr_ver VERSION_EQUAL _mj_lib_ver)
+                    message(FATAL_ERROR
+                        "MuJoCo のヘッダとライブラリの版が一致しません。\n"
+                        "  header ${_mj_hdr_ver}: ${MUJOCO_INCLUDE_DIR}\n"
+                        "  lib    ${_mj_lib_ver}: ${_mj_real}\n"
+                        "このままビルドすると実行時に SEGV します。"
+                        "include と lib を同じ root から組で指定してください:\n"
+                        "  cmake -S . -B build -DMUJOCO_INCLUDE_DIR=<root>/include "
+                        "-DMUJOCO_LIB_DIR=<root>/lib")
+                endif()
+                message(STATUS "MuJoCo version check: header/lib とも ${_mj_lib_ver}")
+            endif()
+        endif()
+    endif()
+
     if(MUJOCO_LIBRARY)
         message(STATUS "MuJoCo lib found: ${MUJOCO_LIBRARY} -- building mujoco_radar_integration_test")
         add_executable(mujoco_radar_integration_test
@@ -214,24 +313,53 @@ if(HAKO_SENSOR_BUILD_TESTS)
             src/sensors/noise/axis_noise.cpp
         )
         target_compile_features(mujoco_radar_integration_test PRIVATE cxx_std_20)
-        target_include_directories(mujoco_radar_integration_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        target_include_directories(mujoco_radar_integration_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${HAKO_MUJOCO_RUNTIME_DIR}/include)
         target_include_directories(mujoco_radar_integration_test SYSTEM PRIVATE
             ${MUJOCO_INCLUDE_DIR} ${NLOHMANN_JSON_INCLUDE_DIR})
         target_link_libraries(mujoco_radar_integration_test PRIVATE ${MUJOCO_LIBRARY})
         add_test(NAME mujoco_radar_integration_test COMMAND mujoco_radar_integration_test)
 
-        # M2 A-2 LiDAR demo: sense an envsim-sensor generated world (env.xml).
+        # M2 A-2 LiDAR demo: sense a simenv-data generated world (env.xml).
         add_executable(lidar_a2_demo
             examples/envsim_sensor_a2/lidar_a2_demo.cpp
             src/sensors/backend/mujoco_ray_caster.cpp
             src/sensors/lidar/lidar_scan_sensor.cpp
         )
         target_compile_features(lidar_a2_demo PRIVATE cxx_std_20)
-        target_include_directories(lidar_a2_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        target_include_directories(lidar_a2_demo PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${HAKO_MUJOCO_RUNTIME_DIR}/include)
         target_include_directories(lidar_a2_demo SYSTEM PRIVATE ${MUJOCO_INCLUDE_DIR})
         target_link_libraries(lidar_a2_demo PRIVATE ${MUJOCO_LIBRARY})
         add_test(NAME lidar_a2_demo COMMAND lidar_a2_demo
-            "${CMAKE_CURRENT_SOURCE_DIR}/../hakoniwa-envsim-sensor/examples/simple_room/generated/env.xml")
+            "${CMAKE_CURRENT_SOURCE_DIR}/../hakoniwa-simenv-data/examples/sensor_envs/simple_room/generated/env.xml")
+
+        # Manifest-loader check: proves sensor_runtime.hpp actually reads the
+        # radar-equation and RCS keys. radar_math_test covers the formulas, but a
+        # mistyped key there would silently disable the falloff instead of failing.
+        if(NLOHMANN_JSON_INCLUDE_DIR AND EXISTS "${HAKO_PDU_TYPES_INCLUDE_DIR}/builtin_interfaces")
+            add_executable(check_radar_equation
+                examples/envsim_sensor_a2/check_radar_equation.cpp
+                src/sensors/radar/radar_sensor.cpp
+                src/sensors/lidar/lidar3d_sensor.cpp
+                src/sensors/lidar/lidar_scan_sensor.cpp
+                src/sensors/lidar/lidar_2d_sensor.cpp
+                src/sensors/noise/range_noise.cpp
+                src/sensors/noise/axis_noise.cpp
+            )
+            target_compile_features(check_radar_equation PRIVATE cxx_std_20)
+            target_include_directories(check_radar_equation PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/include
+                ${HAKO_MUJOCO_RUNTIME_DIR}/include)
+            target_include_directories(check_radar_equation SYSTEM PRIVATE
+                ${MUJOCO_INCLUDE_DIR} ${NLOHMANN_JSON_INCLUDE_DIR} ${HAKO_PDU_TYPES_INCLUDE_DIR})
+            target_link_libraries(check_radar_equation PRIVATE ${MUJOCO_LIBRARY})
+            add_test(NAME check_radar_equation COMMAND check_radar_equation)
+        else()
+            message(STATUS "nlohmann/json or PDU types missing -- skipping check_radar_equation")
+        endif()
     else()
         message(STATUS "libmujoco not found -- skipping mujoco_radar_integration_test (set MUJOCO_LIB_DIR)")
     endif()

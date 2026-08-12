@@ -115,6 +115,55 @@ namespace hako::robots::sensor::radar::math
         return (p < 0.0) ? 0.0 : ((p > 1.0) ? 1.0 : p);
     }
 
+    // ---------------------------------------------------------------------
+    // Radar equation (link budget)
+    //
+    // detection_reference_range is a convenient stand-in for sensitivity, but it
+    // is not a quantity anyone reads off a datasheet. These helpers DERIVE it
+    // from the parameters that are published: transmit power, antenna gain,
+    // wavelength and minimum detectable signal.
+    //
+    // Monostatic radar equation, received power at range R against RCS sigma:
+    //
+    //     Pr = (Pt * G^2 * lambda^2 * sigma) / ((4*pi)^3 * R^4)
+    //
+    // Setting Pr = Smin and solving for R gives the range at which the target is
+    // just detectable:
+    //
+    //     Rmax = [ (Pt * G^2 * lambda^2 * sigma) / ((4*pi)^3 * Smin) ] ^ (1/4)
+    //
+    // That Rmax is what feeds detection_reference_range. NOTE the division of
+    // labour in this model: the sampler already thins returns as 1/R^2 (ray
+    // density), and DetectionProbability contributes the remaining (ref/R)^2, so
+    // the detection COUNT falls as 1/R^4 -- matching the equation above. Do not
+    // "fix" falloff_exp to 4: that would double-count the sampler's half.
+    // ---------------------------------------------------------------------
+
+    inline double DbiToLinear(double dbi) { return std::pow(10.0, dbi / 10.0); }
+
+    // Rmax for the given link budget. Returns 0 when the budget is incomplete,
+    // which callers read as "no radar equation given, use the direct parameter".
+    inline double RadarEquationRange(double tx_power_w, double gain_dbi, double wavelength_m,
+                                     double rcs_m2, double min_detectable_signal_w)
+    {
+        if (tx_power_w <= 0.0 || wavelength_m <= 0.0
+            || rcs_m2 <= 0.0 || min_detectable_signal_w <= 0.0) {
+            return 0.0;
+        }
+        const double g = DbiToLinear(gain_dbi);
+        const double four_pi_cubed = std::pow(4.0 * kPi, 3.0);
+        const double numerator = tx_power_w * g * g * wavelength_m * wavelength_m * rcs_m2;
+        return std::pow(numerator / (four_pi_cubed * min_detectable_signal_w), 0.25);
+    }
+
+    // Rmax scales as sigma^(1/4), so a target with a different RCS is detectable
+    // out to a proportionally scaled range without re-evaluating the whole budget.
+    inline double ScaleRangeByRcs(double ref_range_m, double rcs_m2, double reference_rcs_m2)
+    {
+        if (ref_range_m <= 0.0 || rcs_m2 <= 0.0 || reference_rcs_m2 <= 0.0) return ref_range_m;
+        return ref_range_m * std::pow(rcs_m2 / reference_rcs_m2, 0.25);
+    }
+
     // An arbitrary angular window, not necessarily centred on the boresight.
     struct AngularWindow
     {

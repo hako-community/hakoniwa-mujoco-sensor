@@ -47,6 +47,8 @@ bool LidarScanSensor::ShouldUpdate(double delta_sec)
 
 void LidarScanSensor::Scan(const backend::SensorState& state, LaserScanFrame& out)
 {
+    // Stamped before any early return: see LiDAR2DSensor::Scan.
+    out.stamp_sec = static_cast<double>(++scan_count_) * GetUpdatePeriodSec();
     out.frame_id = config_.frame_id;
     out.angle_min = static_cast<float>(config_.angle_min_deg * kDeg2Rad);
     out.angle_max = static_cast<float>(config_.angle_max_deg * kDeg2Rad);

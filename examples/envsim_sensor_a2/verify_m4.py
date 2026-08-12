@@ -26,7 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEMO = os.path.join(HERE, "sensing_switch_demo")
 CFG = os.path.normpath(os.path.join(HERE, "../../config/a2"))
 ENV_XML = os.path.normpath(os.path.join(
-    HERE, "../../../hakoniwa-envsim-sensor/examples/simple_room/generated/env.xml"))
+    HERE, "../../../hakoniwa-simenv-data/examples/sensor_envs/simple_room/generated/env.xml"))
 MANIFEST = os.path.join(CFG, "drone-a2-sensors.json")
 fails = []
 

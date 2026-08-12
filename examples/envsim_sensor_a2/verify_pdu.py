@@ -27,7 +27,7 @@ from hakoniwa_pdu.pdu_msgs.sensor_msgs.pdu_conv_LaserScan import pdu_to_py_Laser
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEMO = os.path.join(HERE, "lidar_a2_pdu")
 ENV_XML = os.path.normpath(os.path.join(
-    HERE, "../../../hakoniwa-envsim-sensor/examples/simple_room/generated/env.xml"))
+    HERE, "../../../hakoniwa-simenv-data/examples/sensor_envs/simple_room/generated/env.xml"))
 
 # Drone pose: room centre shifted +2 m North (MuJoCo/ROS x=North), yaw 0.
 POS = (2.0, 0.0, 1.0)

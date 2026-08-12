@@ -82,6 +82,20 @@ namespace hako::robots::sensor::radar
         // Disabled (<= 0) by default: existing manifests keep their behaviour.
         double detection_reference_range {0.0};   // m; full detection out to here
         double detection_falloff_exp {2.0};       // P = (ref/R)^exp beyond it
+
+        // --- radar equation (optional; derives detection_reference_range) ------
+        // Datasheet quantities. When tx_power_w, wavelength_m and
+        // min_detectable_signal_w are all > 0 the loader computes
+        // detection_reference_range from them (math::RadarEquationRange) instead
+        // of taking it verbatim, so sensitivity is expressed in physical terms
+        // rather than as a tuned distance.
+        double tx_power_w {0.0};                  // Pt
+        double antenna_gain_dbi {0.0};            // G, dBi (0 dBi = isotropic)
+        double wavelength_m {0.0};                // lambda (77 GHz -> 0.0039 m)
+        double min_detectable_signal_w {0.0};     // Smin
+        // The RCS the link budget is quoted against. Also the baseline that a
+        // per-target RCS is scaled from (math::ScaleRangeByRcs).
+        double reference_rcs_m2 {1.0};            // sigma_ref
         unsigned int noise_seed {1U};
         std::vector<RadarDistanceAccuracy> distance_accuracy {};
     };

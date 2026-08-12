@@ -282,6 +282,10 @@ namespace hako::robots::sensor::ultrasonic
     struct UltrasonicFrame
     {
         std::string frame_id {"ultrasonic"};
+        // Measurement timestamp, seconds since the sensor started. See the note on
+        // LaserScanFrame::stamp_sec: a fixed range reading is indistinguishable
+        // from a dead sensor without it.
+        double stamp_sec {0.0};
         double range {0.0};
         double variance {0.0};
         UltrasonicStatus status {UltrasonicStatus::INVALID};
@@ -474,6 +478,11 @@ namespace hako::robots::sensor::ultrasonic
         void Measure(UltrasonicFrame& out) override;
 
     private:
+        /**
+         * @brief Measurement counter driving UltrasonicFrame::stamp_sec.
+         */
+        unsigned long scan_count_ {0UL};
+
         /**
          * @brief Physics world used by this sensor.
          */
