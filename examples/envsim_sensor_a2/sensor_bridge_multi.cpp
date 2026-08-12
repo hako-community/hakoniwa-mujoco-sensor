@@ -5,20 +5,25 @@
 // running hakoniwa master SHM as an EXTERNAL client (no conductor), loops:
 //     read  Drone/pos (Twist) -> BasePose
 //     run   the A-2 SensorRuntime over env.xml
-//     write each due sensor's PointCloud2 to its SHM channel by pdu_name:
-//         "lidar_points" -> lidar_ch (ch16)
-//         "radar_scan"/"radar_points" -> radar_ch (ch19)
+//     write each due sensor's PointCloud2 to the SHM channel its pdu_name maps to
 //
-// Extra sensors (a second radar, say) map their pdu_name onto further channels
-// through A2_PDU_MAP, e.g. A2_PDU_MAP="radar_points_rear=21". Unset means the
-// built-in mapping above and nothing else -- a manifest carrying a sensor whose
-// pdu_name has no channel is simply not published, so adding sensors never
-// disturbs a single-sensor setup.
+// Channel wiring (#5). Point A2_PDUDEF at the same pdudef the master was
+// started with and the bridge reads the layout from it -- org_name, channel_id
+// and pdu_size, for this robot. Adding a third radar is then just declaring its
+// channel in the pdudef; nothing has to be repeated on the command line.
+//
+// A2_PDU_MAP="name=ch[,name=ch...]" still overrides, for setups without a
+// pdudef to hand. A manifest sensor whose pdu_name has no channel is not
+// published (adding sensors never disturbs an existing setup), but the bridge
+// names it at startup so a typo does not just look like silence.
 //
 // Usage: sensor_bridge_multi <env.xml> <manifest.json>
 //          [robot=Drone] [pos_ch=1] [pos_size=72]
 //          [lidar_ch=16] [radar_ch=19] [chan_size=177424] [hz=20]
+// Env:   A2_PDUDEF=<pdudef.json>   derive channels from the pdudef (preferred)
+//        A2_PDU_MAP="name=ch,..."  explicit override
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -26,11 +31,15 @@
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
+#include "runtime/pdudef_channels.hpp"
 #include "runtime/sensor_runtime.hpp"
 #include "geometry_msgs/pdu_cpptype_conv_Twist.hpp"
 
@@ -43,6 +52,8 @@ using hako::robots::types::Vector3;
 
 static std::atomic_bool g_run{true};
 static void on_sig(int) { g_run = false; }
+
+using rt::ChannelSpec;
 
 int main(int argc, char** argv)
 {
@@ -79,20 +90,48 @@ int main(int argc, char** argv)
     std::printf("[multi] env=%s manifest=%s, %zu sensor(s)\n",
                 env_xml.c_str(), manifest.c_str(), runtime.component_count());
 
-    if (hako_initialize_for_external() != 0) {
-        std::printf("[multi] ERROR: hako_initialize_for_external() failed "
-                    "(is the master/drone service running?)\n");
-        return 3;
-    }
-    std::printf("[multi] attached to SHM (external). robot=%s lidar_ch=%d radar_ch=%d hz=%d\n",
-                robot.c_str(), lidar_ch, radar_ch, hz);
-
-    // runtime pdu_name -> SHM channel id
-    std::map<std::string, int> name2ch = {
-        {"lidar_points", lidar_ch},
-        {"radar_scan",   radar_ch},   // manifest radar pdu_name
-        {"radar_points", radar_ch},
+    // runtime pdu_name -> SHM channel. Three layers, weakest first:
+    //   1) built-in defaults      -- the historical single-radar wiring
+    //   2) the pdudef (#5)        -- the authority, when A2_PDUDEF points at it
+    //   3) A2_PDU_MAP             -- explicit override, escape hatch
+    // Every existing invocation keeps working: with neither env var set this is
+    // exactly the map the bridge always had.
+    std::map<std::string, ChannelSpec> name2ch = {
+        {"lidar_points", {lidar_ch, chan_size}},
+        {"radar_scan",   {radar_ch, chan_size}},   // manifest radar pdu_name
+        {"radar_points", {radar_ch, chan_size}},
     };
+
+    if (const char* pdudef = std::getenv("A2_PDUDEF")) {
+        std::string err;
+        const auto declared = rt::LoadPduDefChannels(pdudef, robot, err);
+        if (!err.empty()) {
+            // Not fatal: fall back to the built-in wiring rather than refuse to
+            // run. Say so loudly, because the channel numbers in use are then
+            // whatever the command line said, not what the master was started with.
+            std::printf("[multi] WARN: pdudef unusable (%s) -- falling back to built-in channels\n",
+                        err.c_str());
+        } else {
+            for (const auto& [name, spec] : declared) {
+                name2ch[name] = spec;
+            }
+            // The primary radar is declared as "radar_points" in the pdudef but
+            // the radar model names its PDU "radar_scan" (RadarSensor's default).
+            // Bridge the two so a manifest written either way lands on the same
+            // channel. This is the one alias that survives #5; a manifest using
+            // the pdudef's own name needs no special case at all.
+            const auto it = declared.find("radar_points");
+            if (it != declared.end() && declared.find("radar_scan") == declared.end()) {
+                name2ch["radar_scan"] = it->second;
+            }
+            // Only the count here: a pdudef declares every channel the robot has
+            // (motor, battery, cameras...), and listing 20-odd of them buries the
+            // few that matter. The per-sensor lines below say where each one goes.
+            std::printf("[multi] pdudef=%s robot=%s -> %zu channel(s) derived\n",
+                        pdudef, robot.c_str(), declared.size());
+        }
+    }
+
     // A2_PDU_MAP="name=ch[,name=ch...]" adds or overrides entries.
     if (const char* extra = std::getenv("A2_PDU_MAP")) {
         std::string spec(extra);
@@ -105,13 +144,51 @@ int main(int argc, char** argv)
             if (eq != std::string::npos && eq > 0) {
                 const std::string key = item.substr(0, eq);
                 const int ch = std::atoi(item.substr(eq + 1).c_str());
-                name2ch[key] = ch;
-                std::printf("[multi] pdu map: %s -> ch%d\n", key.c_str(), ch);
+                // Keep any size the pdudef already gave this name; an override
+                // that only says "which channel" should not also reset the size.
+                const auto known = name2ch.find(key);
+                const size_t size = (known != name2ch.end() && known->second.pdu_size > 0)
+                                        ? known->second.pdu_size : chan_size;
+                name2ch[key] = ChannelSpec{ch, size};
+                std::printf("[multi] pdu map (override): %s -> ch%d size=%zu\n",
+                            key.c_str(), ch, size);
             }
             if (comma == std::string::npos) break;
             pos = comma + 1;
         }
     }
+
+    // Say which sensors will actually reach the SHM, and which will not.
+    // An unmapped sensor is silent by design (so adding one never disturbs an
+    // existing setup) -- but silence is also what a typo looks like, so name the
+    // gap and the exact fix rather than leaving it to be noticed downstream.
+    size_t published = 0, unmapped = 0, max_pdu = chan_size;
+    for (const auto& c : runtime.components()) {
+        const auto it = name2ch.find(c->pdu_name());
+        if (it == name2ch.end()) {
+            std::printf("[multi] WARN: sensor '%s' (pdu_name=%s) has no channel -- NOT published.\n"
+                        "[multi]       declare it in the pdudef (org_name=\"%s\") or set "
+                        "A2_PDU_MAP=\"%s=<ch>\"\n",
+                        c->id().c_str(), c->pdu_name().c_str(),
+                        c->pdu_name().c_str(), c->pdu_name().c_str());
+            ++unmapped;
+            continue;
+        }
+        std::printf("[multi] publish %-14s (%-10s) -> ch%d\n",
+                    c->pdu_name().c_str(), c->id().c_str(), it->second.channel_id);
+        max_pdu = std::max(max_pdu, it->second.pdu_size);
+        ++published;
+    }
+    std::printf("[multi] %zu sensor(s) mapped, %zu unmapped\n", published, unmapped);
+
+    // SHM last: everything above is configuration, and resolving it first means a
+    // bad pdudef or an unmapped sensor is reported without attaching to anything.
+    if (hako_initialize_for_external() != 0) {
+        std::printf("[multi] ERROR: hako_initialize_for_external() failed "
+                    "(is the master/drone service running?)\n");
+        return 3;
+    }
+    std::printf("[multi] attached to SHM (external). robot=%s hz=%d\n", robot.c_str(), hz);
 
     if (!actor_body.empty()) {
         if (runtime.HasActor(actor_body)) {
@@ -128,7 +205,10 @@ int main(int argc, char** argv)
     bool actor_have_prev = false;
     Vector3 actor_vel{};
     const auto t_start = std::chrono::steady_clock::now();
-    std::vector<char> outbuf(chan_size);
+    // Sized for the LARGEST channel in use. Each write then sends exactly the
+    // bytes its own channel declares -- writing one global chan_size into every
+    // channel only worked because every sensor channel happened to be 177424.
+    std::vector<char> outbuf(max_pdu);
     hako::pdu::msgs::geometry_msgs::Twist twist_conv;
     const auto period = std::chrono::microseconds(1000000 / (hz > 0 ? hz : 1));
 
@@ -222,18 +302,21 @@ int main(int argc, char** argv)
                 auto sink = [&](const std::string& name, const char* data, int len) {
                     auto it = name2ch.find(name);
                     if (it == name2ch.end()) return;
-                    if (static_cast<size_t>(len) > chan_size) return;
-                    std::memset(outbuf.data(), 0, chan_size);
+                    // Each channel gets exactly the byte count it declares.
+                    const size_t width = it->second.pdu_size > 0 ? it->second.pdu_size : chan_size;
+                    if (static_cast<size_t>(len) > width || width > outbuf.size()) return;
+                    std::memset(outbuf.data(), 0, width);
                     std::memcpy(outbuf.data(), data, static_cast<size_t>(len));
-                    if (hako_asset_pdu_write(robot.c_str(), it->second,
-                                             outbuf.data(), chan_size) == 0) {
+                    if (hako_asset_pdu_write(robot.c_str(), it->second.channel_id,
+                                             outbuf.data(), width) == 0) {
                         long& fc = frames[name];
                         ++fc;
                         if (fc % 40 == 1) {
                             std::printf("[multi] frame#%ld %s pos=(%.2f,%.2f,%.2f) vel=(%.2f,%.2f,%.2f) "
                                         "yawrate=%.2f -> ch%d\n",
                                         fc, name.c_str(), tw.linear.x, tw.linear.y, tw.linear.z,
-                                        self_vel.x, self_vel.y, self_vel.z, yaw_rate, it->second);
+                                        self_vel.x, self_vel.y, self_vel.z, yaw_rate,
+                                        it->second.channel_id);
                         }
                     }
                 };

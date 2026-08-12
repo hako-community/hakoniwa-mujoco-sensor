@@ -68,10 +68,15 @@ SENSOR_HZ="${A2_SENSOR_HZ:-20}"
 if [ "${A2_DUAL_RADAR:-0}" = "1" ]; then
   PDUDEF2="${PDUDEF2:-$HERE/config2/webavatar-2-radar2.json}"
   PDU_CONFIG2="${PDU_CONFIG2:-$HERE/config2/avatar-drone-2-radar2.json}"
-  export A2_PDU_MAP="${A2_PDU_MAP:-radar_points_rear=21}"
 fi
 CONF2="${CONF2:-$HERE/config2/api-2}"
 PDUDEF2="${PDUDEF2:-$HERE/config2/webavatar-2-radar.json}"
+# #5: the bridges read the channel layout (org_name -> channel_id/pdu_size) out
+# of the very pdudef the master is started with, so a sensor is wired up by being
+# declared once, here. This used to need A2_PDU_MAP="radar_points_rear=21"
+# alongside -- the same channel number written a second time, with nothing to
+# catch a disagreement. A2_PDU_MAP still overrides if you need it.
+export A2_PDUDEF="$PDUDEF2"
 PDU_CONFIG2="${PDU_CONFIG2:-$HERE/config2/avatar-drone-2.json}"
 ACTOR_BODY="${A2_ACTOR_BODY:-actor_drone2}"
 SCENE="${HAKO_VIZ_SCENE:-res://Scenes/two_drone_avoid.tscn}"

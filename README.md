@@ -255,6 +255,28 @@ python3 drone_daasim/scenario_s3_overtaking.py
   （`hako-cmd stop` → プロセス kill → `reset` → mmap 削除の順）。
 - **pdudef のチャネル構成を変えたら** `/var/lib/hakoniwa/mmap/*.bin` の削除が必須
   （`reset` では消えない。古いサイズの mmap が残ると `data_size mismatch` になる）。
+
+### センサーを増やすとき（チャネルの割り当て）
+
+`sensor_bridge_multi` は **pdudef からチャネル構成を読む**（`A2_PDUDEF`。ランチャが
+自動で export する）。`org_name` → `channel_id`/`pdu_size` の対応がそのまま
+`pdu_name` → 配信先になるので、**チャネル番号を書くのは pdudef の 1 箇所だけ**。
+
+3 本目のレーダーを足す手順:
+
+```bash
+# 1) pdudef にチャネルを宣言（全ロボットの reader/writer に入り、空き番号を自動採番）
+python3 examples/envsim_sensor_a2/add_sensor_channel.py \
+        drone_daasim/config2/webavatar-2-radar2.json radar_points_left
+
+# 2) A-2 マニフェストに pdu_name: "radar_points_left" のセンサーを足す
+# 3) mmap を消してから起動（チャネル構成が変わったため）
+rm -f /var/lib/hakoniwa/mmap/*.bin
+```
+
+`A2_PDU_MAP="name=ch"` は**上書き用の逃げ道として残っている**が、通常は不要。
+マニフェストにチャネルの無いセンサーがあると起動時に警告し、必要な宣言を表示する
+（配信されないだけで他のセンサーには影響しない）。
 - シナリオは**必ずクリーン起動の直後に**実行する。SIGTERM で殺したクライアントは
   アセット解除されず、master の lockstep が固まる。
 - `demo/*.mp4`（デモ録画）は追跡していない。`demo_record.sh` で再生成できる。

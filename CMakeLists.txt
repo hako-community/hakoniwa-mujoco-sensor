@@ -229,6 +229,16 @@ if(HAKO_SENSOR_BUILD_TESTS)
         message(STATUS "PDU types missing -- skipping sensor_stamp_test")
     endif()
 
+    # #5: the SHM channel layout is derived from the pdudef, not hand-written.
+    # nlohmann/json only -- no MuJoCo, no PDU types, no running master.
+    add_executable(pdudef_channels_test tests/pdudef_channels_test.cpp)
+    target_compile_features(pdudef_channels_test PRIVATE cxx_std_20)
+    target_include_directories(pdudef_channels_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(pdudef_channels_test SYSTEM PRIVATE
+        ${NLOHMANN_JSON_INCLUDE_DIR})
+    add_test(NAME pdudef_channels_test COMMAND pdudef_channels_test)
+
     # #12: the sensor's own angular velocity -> the mount's lever-arm term.
     # Includes runtime/sensor_runtime.hpp for MakeState, which pulls the PDU
     # converters, hence the same guard. MakeState is inline and no SensorRuntime
