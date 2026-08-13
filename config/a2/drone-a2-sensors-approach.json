@@ -1,0 +1,75 @@
+{
+  "$schema": "./a2-sensor-manifest.schema.json",
+  "name": "drone_a2_sensors",
+  "description": "Downward-biased elevation window for approach/landing traffic (issue #7). The shipped 20 deg symmetric FOV can only follow a height difference of r*tan(10) ~= 0.18r, so an aircraft on final approach leaves the window exactly when it matters -- close in and below. Elevation is opened to 45 deg placed ASYMMETRICALLY at -35..+10, because the sector that matters below the horizon is far larger than the one above it. points_per_second is raised by the same 2.25x span ratio: PointsPerScan() does not depend on the window, so widening it alone would spread the same rays over more sky and make the radar LESS sensitive (measured: 1751 -> 799 returns on a fixed target, restored to 1779 by the compensation). COST, measured with a floor in the sensing world at a 1.2 m cruise height: ground returns go from 49 to 237 per frame and the nearest one from 6.33 m to 1.91 m. All of it is static, so a moving-target filter removes it while the aircraft HOVERS -- but not while it flies: ground 30 deg below a radar moving at 1 m/s closes at 0.87 m/s, which no sane threshold rejects. Use this fit over terrain only with that in mind; over an empty sensing world (two_drone_run.sh noground, the S-5 default) there is no cost at all.",
+  "pdu_robot": "Drone",
+  "components": [
+    {
+      "id": "front_lidar",
+      "kind": "sensor",
+      "type": "lidar_3d",
+      "pdu_name": "lidar_points",
+      "mount": {
+        "x": 0.15,
+        "y": 0.0,
+        "z": 0.0,
+        "yaw_deg": 0.0
+      },
+      "params": {
+        "frame_id": "front_lidar_frame",
+        "channels": 15,
+        "rotations_per_second": 10,
+        "points_per_second": 54150,
+        "max_distance": 20.0,
+        "min_distance": 0.05,
+        "vertical_fov_lower_deg": -15.0,
+        "vertical_fov_upper_deg": 15.0,
+        "horizontal_fov_start_deg": -180.0,
+        "horizontal_fov_end_deg": 180.0
+      }
+    },
+    {
+      "id": "safety_scan",
+      "kind": "sensor",
+      "type": "lidar_2d",
+      "pdu_name": "scan",
+      "mount": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0,
+        "yaw_deg": 0.0
+      },
+      "params": {
+        "frame_id": "scan_frame",
+        "angle_min_deg": -180.0,
+        "angle_max_deg": 180.0,
+        "angle_increment_deg": 1.0,
+        "range_min": 0.05,
+        "range_max": 20.0,
+        "scan_frequency_hz": 10
+      }
+    },
+    {
+      "id": "front_radar",
+      "kind": "sensor",
+      "type": "radar",
+      "pdu_name": "radar_scan",
+      "mount": {
+        "x": 0.15,
+        "y": 0.0,
+        "z": 0.0,
+        "yaw_deg": 0.0
+      },
+      "params": {
+        "frame_id": "front_radar_frame",
+        "range": 20.0,
+        "horizontal_fov_deg": 60.0,
+        "vertical_fov_deg": 20.0,
+        "elevation_start_deg": -35.0,
+        "elevation_end_deg": 10.0,
+        "points_per_second": 3375,
+        "noise_seed": 1
+      }
+    }
+  ]
+}

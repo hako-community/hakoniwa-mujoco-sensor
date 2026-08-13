@@ -128,7 +128,7 @@ def main():
         for name, d in DRONES.items():
             face, goal = d["face"], d["goal"]
             xyz = read_xyz(name); px = xyz[0] if xyz else d["start"]
-            sc = dc.scan(name, az_half=15.0, el_half=15.0)
+            sc = dc.scan_best(name, az_half=15.0, el_half=15.0)
             rng, dop = sc.rng, sc.doppler
             if rng is not None and not detected[name]:
                 detected[name], r_det[name] = True, rng

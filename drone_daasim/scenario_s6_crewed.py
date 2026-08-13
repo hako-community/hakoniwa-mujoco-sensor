@@ -105,7 +105,7 @@ def main():
         for name, step in ((THREAT, STEP_THREAT), (UAS, STEP_UAS)):
             p = dc.read_xyz(name)
             px = p[0] if p else START[name]
-            s = dc.scan(name, az_half=AZ_HALF, el_half=15.0)
+            s = dc.scan_best(name, az_half=AZ_HALF, el_half=15.0)
             sign = 1.0 if YAW[name] == 0.0 else -1.0
             if name == THREAT:
                 if s.rng is not None:

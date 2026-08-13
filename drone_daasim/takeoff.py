@@ -13,8 +13,14 @@ import time
 
 import hakoniwa_pdu.apps.drone.hakosim as hakosim
 
-DRONE_CORE = os.environ.get("DRONE_CORE",
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# drone_daasim lives inside hakoniwa-mujoco-sensor, so ".." is that repo, not
+# drone-core -- the sibling one directory further up. The old default resolved to
+# hakoniwa-mujoco-sensor/config/pdudef/webavatar.json, which does not exist, so a
+# bare `python takeoff.py` died with FileNotFoundError. Left over from the
+# 2026-07-04 move of localsim/ into this repo, which fixed env.sh but not this.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+DRONE_CORE = os.environ.get(
+    "DRONE_CORE", os.path.join(os.path.dirname(os.path.dirname(_HERE)), "hakoniwa-drone-core"))
 CFG = sys.argv[1] if len(sys.argv) > 1 else os.path.join(DRONE_CORE, "config/pdudef/webavatar.json")
 
 

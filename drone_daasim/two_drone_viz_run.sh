@@ -138,6 +138,14 @@ nohup stdbuf -oL -eL "$BRIDGE" "$A2_ENV2" "$A2_MANIFEST2" Drone1 1 72 16 19 1774
   "$ACTOR_BODY" Drone  1 > "$LOG_DIR/b1_drone1.log" 2>&1 &
 B2=$!
 echo "$B1" > "$LOG_DIR/bridge_Drone.pid"; echo "$B2" > "$LOG_DIR/bridge_Drone1.pid"
+# #6: what each aircraft was launched with, so a scenario started from another
+# shell can discover its radar fit. See two_drone_run.sh for the reasoning.
+cat > "$LOG_DIR/stack.json" <<EOF
+{
+  "pdudef": "$PDUDEF2",
+  "manifests": { "Drone": "$A2_MANIFEST", "Drone1": "$A2_MANIFEST2" }
+}
+EOF
 _say "bridges: Drone pid=$B1 / Drone1 pid=$B2"
 ok1=0; ok2=0
 for _ in $(seq 1 60); do

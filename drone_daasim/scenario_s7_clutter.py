@@ -105,9 +105,9 @@ def main():
             px = p[0] if p else d["start"]
             true_sep = math.dist(p, po) if (p and po) else None
 
-            raw = dc.scan(name, az_half=AZ_HALF, el_half=EL_HALF)
-            mov = dc.scan(name, az_half=AZ_HALF, el_half=EL_HALF,
-                          min_abs_doppler=MIN_DOPPLER)
+            raw = dc.scan_best(name, az_half=AZ_HALF, el_half=EL_HALF)
+            mov = dc.scan_best(name, az_half=AZ_HALF, el_half=EL_HALF,
+                               min_abs_doppler=MIN_DOPPLER)
             total_frames[name] += 1
             raw_hits[name] += raw.count
             mov_hits[name] += mov.count

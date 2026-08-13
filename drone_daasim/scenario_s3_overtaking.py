@@ -96,6 +96,9 @@ def main():
 
     detected = {n: False for n in (FAST, SLOW)}
     r_det = {n: None for n in (FAST, SLOW)}
+    # Which radar of the fit produced the first detection. On the overtaken
+    # aircraft this is the whole coverage question in one field.
+    det_by = {n: None for n in (FAST, SLOW)}
     rng_tr = {n: RangeTracker() for n in (FAST, SLOW)}
     spd_tr = {n: dc.SpeedTracker() for n in (FAST, SLOW)}
     role = {n: None for n in (FAST, SLOW)}
@@ -116,13 +119,14 @@ def main():
             # The overtaker uses its forward window to fly the encounter; the
             # overtaken aircraft is polled over the full azimuth so the report
             # can state whether the threat behind it was visible at all.
-            s = dc.scan(name, az_half=AZ_HALF, el_half=15.0)
+            s = dc.scan_best(name, az_half=AZ_HALF, el_half=15.0)
             # The overtaken aircraft is polled across EVERY radar channel it has:
             # on a dual-radar stack the rear sector answers, on a single-radar one
             # only the (blind) forward radar does.
             look = s if name == FAST else dc.scan_best(name, az_half=AZ_HALF_REAR, el_half=15.0)
             if look.rng is not None and not detected[name]:
                 detected[name], r_det[name] = True, look.rng
+                det_by[name] = look.source
             closure = rng_tr[name].update(now, s.rng, s.doppler)
             own = spd_tr[name].update(now, p)
             if role[name] is None:
@@ -213,14 +217,23 @@ def main():
     # --- verdict --------------------------------------------------------------
     rep = StepReport("S-3 overtaking (施行規則 §185 pass on the right / §186 stand on)", DWC)
 
-    # The overtaken aircraft is BLIND to the rear -- expected, and reported.
+    # Whether the overtaken aircraft can see astern is a property of the FIT it
+    # was launched with, not an assumption: ask the fit, and say which radar
+    # answered. A forward-only aircraft is blind there and the run says so; add
+    # a rear sector and the same scenario reports the detection instead.
+    rear_covered = dc.covers_az(SLOW, 180.0)
     rep.record(1, detected[FAST],
                f"overtaking {FAST}: first detection at "
                + (f"{r_det[FAST]:.2f} m" if r_det[FAST] is not None else "none")
-               + f" | overtaken {SLOW}: "
-               + (f"{r_det[SLOW]:.2f} m (full-azimuth check)" if r_det[SLOW] is not None else
-                  "NO detection -- the threat is at 180 deg, outside the forward radar "
-                  "(coverage finding, not a scenario failure: §185 puts the duty on the overtaker)"))
+               + (f" (by {det_by[FAST]})" if det_by[FAST] else "")
+               + f" | overtaken {SLOW} [{dc.fit_summary(SLOW)}]: "
+               + (f"{r_det[SLOW]:.2f} m by {det_by[SLOW]} (full-azimuth check)"
+                  if r_det[SLOW] is not None else
+                  "NO detection -- "
+                  + ("no radar in the fit covers 180 deg" if rear_covered is False else
+                     "the rear sector is fitted but returned nothing")
+                  + " (coverage finding, not a scenario failure: §185 puts the duty "
+                    "on the overtaker)"))
 
     rec = role[FAST] == dc.OVERTAKE
     rep.record(2, rec, "encounter classified from closure vs own speed: "
@@ -258,7 +271,10 @@ def main():
           f"well_clear={enc.well_clear_kept}, stand_on_held={stand_ok}, passed={passed_ahead})",
           flush=True)
     print(f"[s3] COVERAGE: overtaken aircraft detected the follower? "
-          f"{'yes' if detected[SLOW] else 'NO (rear blind sector)'}", flush=True)
+          + (f"yes, by {det_by[SLOW]} at {r_det[SLOW]:.2f} m" if detected[SLOW]
+             else "NO (rear blind sector)")
+          + f" | fit: {dc.fit_summary(SLOW)}, astern covered: {rear_covered}",
+          flush=True)
     return 0 if ok else 1
 
 

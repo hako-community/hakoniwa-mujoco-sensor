@@ -173,6 +173,112 @@ bash drone_daasim/diag.sh
 5. **ライブラリ版差の残り** … `Plugins/Linux/x86_64/libhako_service_c.so` と `/usr/local/hakoniwa` の core/conductor が
    完全に同一ビルドか（登録は通ったが Start プロトコルで差がないか）。
 
+## レーダー構成（radar fit）— DAA シナリオが「何本のレーダーで飛んでいるか」
+
+シナリオ側（`daa_common.scan_best`）は**その機体が積んでいる全レーダー**を読む。
+どのレーダーを積んでいるかは決め打ちではなく、ブリッジ自身が配線を解決するのと
+**同じ 2 ファイル**から導出する。
+
+| 情報 | 出どころ |
+|---|---|
+| 何を積んでいるか / どこを向いているか（方位窓・マウント yaw） | A-2 マニフェスト（`config/a2/drone-a2-sensors*.json`） |
+| どのチャネルに publish されるか | pdudef（`config2/webavatar-2-radar*.json`） |
+
+`two_drone_run.sh` / `two_drone_viz_run.sh` は起動時に実際に使った組み合わせを
+`logs/stack.json` に書く。**シナリオはランチャとは別のシェルで起動されるのが普通**
+（`demo_all.sh` がまさにそう）なので、環境変数ではなくこのファイルで受け渡す。
+
+```bash
+# 前方 60° 1本（従来どおり）
+bash two_drone_run.sh noground && python scenario_s3_overtaking.py
+#   -> [fit] Drone1: 1 radar(s): front_radar ch19 az [-30,+30] | 60 deg of 360 covered
+#      追い越される側は相手を最後まで見つけられない（後方死角）
+
+# 前方 60° + 後方 150..210° の 2本
+A2_DUAL_RADAR=1 A2_MANIFEST=../config/a2/drone-a2-sensors-dual.json \
+  bash two_drone_run.sh noground && S3_GAP=3.0 python scenario_s3_overtaking.py
+#   -> [fit] Drone1: 2 radar(s): front_radar ch19 + rear_radar ch21 | 120 deg of 360
+#      追い越される側が rear_radar で 2.89 m に検知（シナリオ側は無改造）
+```
+
+### 仰角の覆域（#7）
+
+fit は方位だけでなく**仰角の窓**も持つ。既定の `vertical_fov_deg: 20.0` は
+ボアサイト中心の ±10° であり、距離 r で追える高度差は **r·tan(10°) ≒ 0.18r** しかない。
+最終進入中の機体は「近くて下」——まさにこの窓から外れる位置に来る。
+
+`config/a2/drone-a2-sensors-approach.json` は仰角を **-35..+10°（45°）** の
+**非対称**な窓に開く。水平線の下に必要な範囲は上より遥かに広いためである。
+
+```bash
+# S-5 を既定の 20° 窓で
+bash two_drone_run.sh noground && python scenario_s5_landing.py
+
+# 仰角を開いた fit で（シナリオ側は無改造）
+A2_MANIFEST=../config/a2/drone-a2-sensors-approach.json \
+  bash two_drone_run.sh noground && python scenario_s5_landing.py
+```
+
+**窓を広げる代償は 2 つあり、どちらも実測してある**（詳細＝`devai/radar_issue7_*.md`）。
+
+1. **レイ密度の希釈**: `PointsPerScan()` は窓の広さに依存しない。窓を 2.25 倍にすると
+   同じレイが 2.25 倍の立体角に散り、**同じ目標に当たる本数が 1/2.25 になる**
+   （実測 1751 → 799）。approach マニフェストが `points_per_second` を
+   1500 → 3375 にしているのはこのため（実測 1779 ＝ 復元）。
+2. **地面クラッタ**: 高度 1.2 m・地面ありの世界で、返り 49 → **237 本/frame**、
+   最近傍の地面反射 6.33 m → **1.91 m**。ホバリング中は全て静止（Doppler≈0）なので
+   移動目標フィルタで落ちるが、**飛行中は落ちない**——1 m/s で前進すると
+   30° 下の地面は 0.87 m/s で近づくため。地面のある世界ではここを承知で使うこと
+   （`two_drone_run.sh noground` ＝ S-5 の既定は地面が無いので代償ゼロ）。
+
+### 方位の覆域（#13）
+
+狭い進入幾何では**仰角より方位が先に律速する**。`S5_START=4.0` の S-5 では
+初期 4 tick の未検知が全て `azimuth -52..-41 deg outside [-30,+30]` だった。
+
+`config/a2/drone-a2-sensors-approach-wide.json` は #7 の仰角窓に加えて方位を
+**150°** に開く。`points_per_second` は**立体角比 (150×45)/(60×20) = 5.625 倍**
+（1500 → 8438）。**軸を 2 本広げると代償は足し算ではなく掛け算**になる。
+
+| fit | 窓 | 初探知（`S5_START=4.0`） | 結果 |
+|---|---|---|---|
+| 既定 | 60×20 | 2.73 m（1回のみ・分類不能） | **FAIL** |
+| approach (#7) | 60×45 | 1.99 m | PASS |
+| approach-wide (#13) | 150×45 | **6.13 m（初回 tick）** | PASS |
+
+**シナリオ側の角度フィルタが fit より狭いと、広げた覆域を自分で捨てる。**
+S-5 の `AZ_HALF=25` がまさにそれで、150° レーダーに対して 40〜50° の交通を
+**このファイルが**捨てていた（`AZ_HALF = None` に修正済み）。
+`dc.coverage_gap(..., az_half, el_half)` に自前の窓を渡すと、
+「**シナリオ自身の窓**で外れた」のか「レーダーの窓で外れた」のかを区別して返す。
+
+### 見えなかった理由の切り分けと計測
+
+`dc.coverage_gap()` は方位・仰角・距離・自前の窓のどれで外れたかを名前で返す。
+S-5 は毎 tick `MISS[...]` として記録する。
+`python probe_elevation.py [robot] [secs]` は仰角バンド別の返り本数と静止率を出す
+読み取り専用プローブ。
+
+マニフェストを書いたら**必ず**次で検算する。窓を広げて `points_per_second` を
+上げ忘れた場合に、必要な値を計算して警告する:
+
+```bash
+python examples/envsim_sensor_a2/validate_manifest.py config/a2/drone-a2-sensors-*.json
+#  front_radar: window 150x45 deg, 844 pts/scan -> 0.1250 pts/deg^2 (1.00x the baseline fit)
+#  [WARN] ... is 5.6x THINNER than the baseline -- it will detect less, at every range.
+#         raise points_per_second to ~8438 ...
+```
+
+上書き用の環境変数（通常は不要）:
+
+- `A2_MANIFEST_<robot>` — 機体ごとのマニフェスト（`A2_MANIFEST` は両機共通）
+- `A2_PDUDEF` — チャネル定義（`sensor_bridge_multi` と同じ変数）
+- `A2_RADAR_CHANNELS="19,21"` — マニフェストも pdudef も無視してチャネル直指定
+
+**マニフェストに載っていても pdudef にチャネルが無いレーダーは fit から外れる**
+（ブリッジが publish しないものを読みに行かないため）。単一レーダー構成では
+`scan_best()` は従来の `scan()` と完全に同一の結果を返す。
+
 ## 注意
 - ⚠️ **起動・片付けの順序（重要・ハマりどころ）**: `hako-cmd stop/status/reset` は
   **マスタ(=native物理サービス)が生きていることが前提**で、マスタ不在で呼ぶと

@@ -15,7 +15,8 @@ Fault injection is real, not simulated in the scenario logic: the bridge process
 that publishes Drone's radar is SIGSTOPped, so the PDU simply stops changing.
 That is what a hung sensor looks like from the flight software's side -- the last
 frame stays in shared memory forever, so a "no data" check would never fire and
-freshness has to be judged from the CONTENT (daa_common.StaleWatch).
+freshness has to be judged from the CONTENT (daa_common.FitWatch, one StaleWatch
+per radar of the fit).
 
 This scenario is also what forced the radar to timestamp its scans. Judging
 freshness by content alone is unsound: a scan that detects nothing is
@@ -23,6 +24,15 @@ byte-identical to the previous empty scan, so a perfectly healthy sensor looking
 at empty sky reads as "stale". Every scan now carries a monotonic stamp
 (radar_sensor.cpp / radar_point_cloud.hpp), which makes "the payload stopped
 changing" mean exactly "the sensor stopped producing".
+
+Health is tracked per RADAR, not per aircraft (daa_common.FitWatch). 6.2.5 is
+about surviving the loss of any single component, so on a multi-radar fit the
+loss of one sector is a loss of COVERAGE -- reported, and flown on with what is
+left -- while only the loss of all of them is blindness. Note what this scenario
+can and cannot inject: SIGSTOP hits the bridge process, which publishes every
+radar of that aircraft, so the fault here is always total. The partial case is
+implemented and reported (DEGRADED), but exercising it needs per-sensor fault
+injection the bridge does not have.
 
 Expected behaviour:
   Drone  (faulty)  detects the fault, gives up on avoidance and holds -- an
@@ -101,10 +111,20 @@ def main():
     sampler = dc.Sampler(enc, FAULTY, HEALTHY)
     sampler.start()
 
-    watch = dc.StaleWatch(STALE_TIMEOUT)
+    # One StaleWatch per radar of the fit, not one for the primary channel.
+    # 6.2.5 is about surviving the loss of ANY SINGLE component, so losing one
+    # radar of two has to read differently from losing them all: the first is a
+    # loss of coverage to fly on with, the second is blindness. On a
+    # single-radar aircraft `blind` is exactly the old verdict.
+    watch = dc.FitWatch(STALE_TIMEOUT)
     fault_injected_at = None
     fault_declared_at = None
     contingency = False
+    degraded_seen = False
+    # The fit's health AT THE MOMENT the fault was declared. Reading it again in
+    # the verdict would report the state after the SIGCONT recovery -- i.e. all
+    # radars healthy, which is true and useless.
+    fault_summary = None
     hold_x = None
 
     detected_h = False
@@ -124,15 +144,24 @@ def main():
 
         # --- faulty aircraft: monitor its own sensor -------------------------
         now = time.time()
-        stale = watch.update(now, dc.radar_hash(FAULTY))
-        if stale and not contingency:
+        watch.update(now, FAULTY)
+        stale = bool(watch.stale)
+        if watch.degraded and not degraded_seen:
+            # Coverage lost but not sight: report it (4.2 e) and keep sensing on
+            # what is left rather than treating a partial failure as blindness.
+            degraded_seen = True
+            print(f"  *** DEGRADED on {FAULTY}: {watch.summary()} "
+                  f"-> continuing on the surviving radar(s) ***", flush=True)
+        if watch.blind and not contingency:
             contingency = True
             fault_declared_at = now
+            fault_summary = watch.summary()
             p = dc.read_xyz(FAULTY)
             hold_x = p[0] if p else PLAN[FAULTY]["start"]
             lat = (fault_declared_at - fault_injected_at) if fault_injected_at else float("nan")
             print(f"  *** SENSOR FAULT DECLARED on {FAULTY} after {lat:.2f} s "
-                  f"-> contingency: hold position at x={hold_x:+.2f} ***", flush=True)
+                  f"({watch.summary()}) -> contingency: hold position at "
+                  f"x={hold_x:+.2f} ***", flush=True)
 
         pf = dc.read_xyz(FAULTY)
         pfx = pf[0] if pf else PLAN[FAULTY]["start"]
@@ -148,7 +177,7 @@ def main():
         # --- healthy aircraft: normal DAA ------------------------------------
         ph = dc.read_xyz(HEALTHY)
         phx = ph[0] if ph else PLAN[HEALTHY]["start"]
-        s = dc.scan(HEALTHY, az_half=AZ_HALF, el_half=EL_HALF)
+        s = dc.scan_best(HEALTHY, az_half=AZ_HALF, el_half=EL_HALF)
         if s.rng is not None and not detected_h:
             detected_h, r_det_h = True, s.rng
         closure = rng_tr.update(time.time(), s.rng, s.doppler)
@@ -195,7 +224,9 @@ def main():
     recovered = False
     recover_t0 = time.time()
     for _ in range(30):
-        if not watch.update(time.time(), dc.radar_hash(FAULTY)):
+        # Recovered means every radar of the fit is producing again, not just
+        # the one the old check happened to look at.
+        if not watch.update(time.time(), FAULTY).stale:
             recovered = True
             break
         time.sleep(0.2)
@@ -228,7 +259,11 @@ def main():
     rep.record(2, latency is not None and latency <= STALE_TIMEOUT + 1.0,
                "fault detected from payload staleness in "
                + (f"{latency:.2f} s (timeout {STALE_TIMEOUT} s)" if latency else "NOT DETECTED")
-               + "  -- the PDU still reads back fine; what stops is the scan timestamp advancing")
+               + "  -- the PDU still reads back fine; what stops is the scan timestamp advancing"
+               + f" | isolated per radar at declaration: {fault_summary or 'n/a'}"
+               + ("" if degraded_seen else
+                  " (had only part of the fit gone, the aircraft would have flown on "
+                  "with the rest instead of holding)"))
 
     rep.record(3, contingency and lane_ok,
                f"contingency on {FAULTY}: hold at x={hold_x:+.2f} (stopped closing) | "

@@ -102,6 +102,19 @@ nohup stdbuf -oL -eL "$BRIDGE" "$A2_ENV2" "$A2_MANIFEST2" Drone1 1 72 16 19 1774
 B2=$!
 # PID files so a scenario can inject a sensor fault into ONE bridge (S-8).
 echo "$B1" > "$LOG_DIR/bridge_Drone.pid"; echo "$B2" > "$LOG_DIR/bridge_Drone1.pid"
+
+# #6: record what each aircraft was actually launched with, so a scenario can
+# discover its RADAR FIT -- the manifest says what is fitted and where it looks,
+# the pdudef says which channel each radar publishes on. A scenario is normally
+# started from a different shell than this launcher (demo_all.sh does exactly
+# that), so exported variables would not reach it; a file that outlives the
+# launcher does. Env vars still override, for a one-off run.
+cat > "$LOG_DIR/stack.json" <<EOF
+{
+  "pdudef": "$PDUDEF2",
+  "manifests": { "Drone": "$A2_MANIFEST", "Drone1": "$A2_MANIFEST2" }
+}
+EOF
 _say "bridges: Drone pid=$B1 / Drone1 pid=$B2 (env=$ENVMODE: $(basename "$A2_ENV") / $(basename "$A2_ENV2"), manifest=$(basename "$A2_MANIFEST")/$(basename "$A2_MANIFEST2"))"
 
 ok1=0; ok2=0

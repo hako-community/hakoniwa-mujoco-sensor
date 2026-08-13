@@ -105,7 +105,7 @@ def main():
         for name, d in DRONES.items():
             p = dc.read_xyz(name)
             px, py = (p[0], p[1]) if p else d["start"]
-            s = dc.scan(name, az_half=AZ_HALF, el_half=15.0)
+            s = dc.scan_best(name, az_half=AZ_HALF, el_half=15.0)
             if s.rng is not None and not detected[name]:
                 detected[name], r_det[name] = True, s.rng
             closure = track[name].update(time.time(), s.rng, s.doppler)

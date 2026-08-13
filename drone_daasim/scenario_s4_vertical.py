@@ -19,6 +19,23 @@ about the vertical; ISO 15964 3.9 lists climb and descent among the manoeuvres a
 DAA system may use. The split is made deterministic the same way the horizontal
 one is -- by a fixed convention, here "the aircraft heading +x climbs".
 
+Why the commit legs go through daa_common.fly_to (issue #10)
+-----------------------------------------------------------
+This scenario used to fail about one run in three, always on Drone1, always
+leaving it parked on its last approach waypoint. It is not a settling problem
+and not a radar problem: the drone service judges a move complete only once x,
+y, z AND YAW have all been within tolerance for 100 consecutive control steps,
+and it compares yaw NUMERICALLY (drone-pro drone_service_api.hpp almost_equal).
+Drone1 flies heading 180 deg, which sits exactly on the +/-180 branch cut, so
+whenever its yaw settles on -180.00 against a target of +180.00 the comparison
+is off by 360 and never succeeds. The service then stays in MAIN_STATUS_MOVING
+for good -- and a move is only ACCEPTED in HOVERING, so every later leg is
+dropped in silence.
+
+So the legs here fly, check the true position, and on failure cancel the stuck
+move (which the service does honour) before re-issuing. Retrying without the
+cancel measurably does nothing.
+
 Run AFTER:  bash drone_daasim/two_drone_run.sh noground
 Usage:      python scenario_s4_vertical.py
 """
@@ -86,7 +103,7 @@ def main():
         for name, d in DRONES.items():
             p = dc.read_xyz(name)
             px = p[0] if p else d["start"]
-            s = dc.scan(name, az_half=AZ_HALF, el_half=EL_HALF)
+            s = dc.scan_best(name, az_half=AZ_HALF, el_half=EL_HALF)
             if s.rng is not None and not detected[name]:
                 detected[name], r_det[name] = True, s.rng
             closure = track[name].update(time.time(), s.rng, s.doppler)
@@ -114,32 +131,36 @@ def main():
     time.sleep(0.6)
     z_target = {n: H_CRUISE + d["climb"] * DZ for n, d in DRONES.items()}
     level_ok = {}
-    for attempt in range(2):
-        for name, d in DRONES.items():
-            if level_ok.get(name):
-                continue
-            p = dc.read_xyz(name)
-            px = p[0] if p else d["start"]
-            clients[name].moveToPosition(px, 0.0, z_target[name], MOVE_SPEED,
-                                         yaw_deg=d["yaw"], timeout_sec=CLIMB_TO)
-            p = dc.read_xyz(name)
-            level_ok[name] = p is not None and abs(p[2] - z_target[name]) < 0.35
-            print(f"  {name} z={p[2]:+.2f} (target {z_target[name]:+.2f}) "
-                  f"ok={level_ok[name]} attempt={attempt}" if p else "  z ??", flush=True)
+    for name, d in DRONES.items():
+        p = dc.read_xyz(name)
+        px = p[0] if p else d["start"]
+        # This is the leg the aircraft used to get stuck on (#10), so it is also
+        # the one that has to clear the stuck state -- otherwise the wedge is
+        # merely carried into the crossing, where it costs another timeout
+        # before anything notices.
+        f = dc.fly_to(clients[name], name, px, 0.0, z_target[name], MOVE_SPEED,
+                      d["yaw"], CLIMB_TO, tol=0.35, retries=1, log="B")
+        p = dc.read_xyz(name)
+        level_ok[name] = p is not None and abs(p[2] - z_target[name]) < 0.35
+        print(f"  {name} z={p[2]:+.2f} (target {z_target[name]:+.2f}) "
+              f"ok={level_ok[name]}" if p else "  z ??", flush=True)
     vertical_split = all(level_ok.values())
 
     # --- PHASE C: cross while vertically separated ---------------------------
     print("C) cross on separated levels (same ground track) ...", flush=True)
+    cross = {}
     for name, d in DRONES.items():
-        clients[name].moveToPosition(d["goal"], 0.0, z_target[name], MOVE_SPEED,
-                                     yaw_deg=d["yaw"], timeout_sec=CROSS_TO)
+        cross[name] = dc.fly_to(clients[name], name, d["goal"], 0.0, z_target[name],
+                                MOVE_SPEED, d["yaw"], CROSS_TO, tol=GOAL_EPS,
+                                retries=1, log="C")
 
     # --- PHASE D: back to the cruise level -----------------------------------
     print("D) return to the cruise level ...", flush=True)
-    reached, z_err = {}, {}
+    reached, z_err, home = {}, {}, {}
     for name, d in DRONES.items():
-        clients[name].moveToPosition(d["goal"], 0.0, H_CRUISE, MOVE_SPEED,
-                                     yaw_deg=d["yaw"], timeout_sec=HOME_TO)
+        home[name] = dc.fly_to(clients[name], name, d["goal"], 0.0, H_CRUISE,
+                               MOVE_SPEED, d["yaw"], HOME_TO, tol=GOAL_EPS,
+                               retries=1, log="D")
         p = dc.read_xyz(name)
         reached[name] = p is not None and abs(p[0] - d["goal"]) < GOAL_EPS
         z_err[name] = abs(p[2] - H_CRUISE) if p else math.inf

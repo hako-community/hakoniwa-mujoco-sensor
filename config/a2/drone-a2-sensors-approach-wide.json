@@ -1,0 +1,75 @@
+{
+  "$schema": "./a2-sensor-manifest.schema.json",
+  "name": "drone_a2_sensors",
+  "description": "Approach/landing fit, WIDE azimuth (issue #13). The elevation-only fit of #7 (drone-a2-sensors-approach.json) fixed the descent geometry but left azimuth at 60 deg, and measurement showed that in a tighter approach it is AZIMUTH that binds first: with S5_START=4.0 the cruising aircraft's first four misses were all 'azimuth -52..-41 deg outside [-30,+30]' while the elevation was already inside the window. So this fit opens azimuth to 150 deg as well -- the bearing to traffic converging on a landing point reaches roughly 50 deg, and 150 deg covers it with margin. points_per_second is scaled by the FULL solid-angle ratio (150x45)/(60x20) = 5.625, i.e. 1500 -> 8438: PointsPerScan() does not depend on the window, so widening two axes at a fixed rate would thin the returns 5.6-fold and make the radar far less sensitive than the baseline it is meant to improve on. Use drone-a2-sensors-approach.json instead when you want to vary elevation alone.",
+  "pdu_robot": "Drone",
+  "components": [
+    {
+      "id": "front_lidar",
+      "kind": "sensor",
+      "type": "lidar_3d",
+      "pdu_name": "lidar_points",
+      "mount": {
+        "x": 0.15,
+        "y": 0.0,
+        "z": 0.0,
+        "yaw_deg": 0.0
+      },
+      "params": {
+        "frame_id": "front_lidar_frame",
+        "channels": 15,
+        "rotations_per_second": 10,
+        "points_per_second": 54150,
+        "max_distance": 20.0,
+        "min_distance": 0.05,
+        "vertical_fov_lower_deg": -15.0,
+        "vertical_fov_upper_deg": 15.0,
+        "horizontal_fov_start_deg": -180.0,
+        "horizontal_fov_end_deg": 180.0
+      }
+    },
+    {
+      "id": "safety_scan",
+      "kind": "sensor",
+      "type": "lidar_2d",
+      "pdu_name": "scan",
+      "mount": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0,
+        "yaw_deg": 0.0
+      },
+      "params": {
+        "frame_id": "scan_frame",
+        "angle_min_deg": -180.0,
+        "angle_max_deg": 180.0,
+        "angle_increment_deg": 1.0,
+        "range_min": 0.05,
+        "range_max": 20.0,
+        "scan_frequency_hz": 10
+      }
+    },
+    {
+      "id": "front_radar",
+      "kind": "sensor",
+      "type": "radar",
+      "pdu_name": "radar_scan",
+      "mount": {
+        "x": 0.15,
+        "y": 0.0,
+        "z": 0.0,
+        "yaw_deg": 0.0
+      },
+      "params": {
+        "frame_id": "front_radar_frame",
+        "range": 20.0,
+        "horizontal_fov_deg": 150.0,
+        "vertical_fov_deg": 20.0,
+        "elevation_start_deg": -35.0,
+        "elevation_end_deg": 10.0,
+        "points_per_second": 8438,
+        "noise_seed": 1
+      }
+    }
+  ]
+}

@@ -261,6 +261,20 @@ if(HAKO_SENSOR_BUILD_TESTS)
         message(STATUS "PDU types missing -- skipping sensor_mount_velocity_test")
     endif()
 
+    # #6: the DAA scenarios' radar-fit layer -- which radars an aircraft carries,
+    # resolved from the manifest and the pdudef, and how their returns merge into
+    # one body-frame picture. Python, because that is where the avoidance logic
+    # lives; backend-free (hakopy and the PDU converter are stubbed), so it needs
+    # no running master and no hakoniwa packages.
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME radar_fit_test
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/drone_daasim/radar_fit_test.py)
+    else()
+        message(STATUS "no Python3 interpreter -- skipping radar_fit_test")
+    endif()
+
     # C-ABI smoke: dummy ray caster -> both lidar3d and radar return points.
     # Backend-free (links only the .so), no MuJoCo/PDU/Godot.
     add_executable(hako_sensor_capi_smoke capi/smoke_capi.cpp)

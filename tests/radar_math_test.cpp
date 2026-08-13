@@ -63,6 +63,37 @@ private:
     Vector3 v_;
 };
 
+// Mock backend: a target of fixed ANGULAR size sitting at a fixed bearing. A ray
+// hits only if it falls inside that patch, so the number of detections measures
+// how densely the sampler covers that part of the sky -- which is what changes
+// when the elevation window is widened (issue #7).
+class PatchMockRayCaster : public backend::IRayCaster
+{
+public:
+    PatchMockRayCaster(double d, double az_deg, double el_deg, double half_deg)
+        : d_(d), az_(rmath::DegToRad(az_deg)), el_(rmath::DegToRad(el_deg)),
+          half_(rmath::DegToRad(half_deg)) {}
+
+    backend::RayHit Cast(const Vector3& origin, const Vector3& dir, double /*max*/) override
+    {
+        backend::RayHit h {};
+        const double az = std::atan2(dir.y, dir.x);
+        const double el = std::atan2(dir.z, std::hypot(dir.x, dir.y));
+        if (std::fabs(az - az_) > half_ || std::fabs(el - el_) > half_) {
+            return h;   // miss: the ray went past the target
+        }
+        h.hit = true;
+        h.distance = d_;
+        h.point = Vector3(origin.x + dir.x * d_, origin.y + dir.y * d_, origin.z + dir.z * d_);
+        h.target_id = 1;
+        h.target_rcs_m2 = -1.0;
+        return h;
+    }
+
+private:
+    double d_, az_, el_, half_;
+};
+
 static radar::RadarConfig make_config(double range, double hfov, double vfov, int pps)
 {
     radar::RadarConfig c {};
@@ -329,6 +360,134 @@ int main()
         const size_t strong = count_at(100.0); // corner-reflector-like
         check(weak < ref, "low-RCS target yields fewer detections than the reference");
         check(ref < strong, "high-RCS target yields more detections than the reference");
+    }
+
+    // --- elevation coverage vs ray density (#7) -----------------------------
+    // Widening the elevation window is not free, and the cost is not the one the
+    // issue named. Ground clutter is a property of the SCENE; this is a property
+    // of the SAMPLER and applies even to an empty sky: PointsPerScan() does not
+    // depend on the window, so the same rays get spread over a larger solid
+    // angle and every target inside it collects proportionally fewer of them.
+    // A wider radar is therefore a LESS sensitive radar unless the point rate is
+    // raised to match. Measured here rather than argued.
+    {
+        auto count_win = [](double hfov, double el_start, double el_end, int pps,
+                            double target_az_deg, double target_el_deg) {
+            radar::RadarConfig c {};
+            c.range = 30.0;
+            c.horizontal_fov_deg = hfov;
+            c.vertical_fov_deg = 20.0;          // ignored when the window is set
+            if (!(el_start == 0.0 && el_end == 0.0)) {
+                c.elevation_start_deg = el_start;
+                c.elevation_end_deg = el_end;
+            }
+            c.points_per_second = pps;
+            c.noise_seed = 11U;
+            c.output.update_rate_hz = 1.0;      // pps points per scan
+            auto caster = std::make_shared<PatchMockRayCaster>(10.0, target_az_deg,
+                                                              target_el_deg, 3.0);
+            radar::RadarSensor s(caster);
+            s.SetConfig(c);
+            radar::RadarScanFrame f {};
+            s.Scan(forward_state(), f);
+            return f.detections.size();
+        };
+        auto count = [&](double el_start, double el_end, int pps, double target_el_deg) {
+            return count_win(60.0, el_start, el_end, pps, 0.0, target_el_deg);
+        };
+
+        // Target on the boresight. Baseline = the shipped 20 deg symmetric FOV.
+        const size_t base = count(0.0, 0.0, 60000, 0.0);
+        // Same point rate, elevation opened to 45 deg (-35..+10): 2.25x the span.
+        const size_t wide = count(-35.0, 10.0, 60000, 0.0);
+        // Point rate scaled by the same 2.25 -> density restored.
+        const size_t wide_comp = count(-35.0, 10.0, 135000, 0.0);
+
+        check(base > 0 && wide > 0, "patch target is hit in both configurations");
+        const double dilution = static_cast<double>(base) / static_cast<double>(wide);
+        check(dilution > 1.9 && dilution < 2.6,
+              "widening elevation 20->45 deg costs ~2.25x the return density");
+        const double restored = static_cast<double>(wide_comp) / static_cast<double>(base);
+        check(restored > 0.85 && restored < 1.15,
+              "scaling points_per_second by the span ratio restores the density");
+        std::printf("  [#7] returns on a 6 deg target: vfov20=%zu  el[-35,+10]=%zu  "
+                    "el[-35,+10]@2.25x pps=%zu\n", base, wide, wide_comp);
+
+        // And the coverage that motivates the change: traffic 25 deg below the
+        // horizon -- an aircraft on final approach seen from above, close in --
+        // is simply not there for the symmetric window, at any point rate.
+        check(count(0.0, 0.0, 600000, -25.0) == 0,
+              "a target 25 deg below the horizon is invisible to the 20 deg FOV");
+        check(count(-35.0, 10.0, 60000, -25.0) > 0,
+              "the downward-biased window sees it");
+
+        // --- #13: the same law over BOTH axes at once -----------------------
+        // Opening azimuth as well multiplies the dilution rather than adding to
+        // it: the cost is the ratio of SOLID ANGLES, (150x45)/(60x20) = 5.625.
+        // Getting this wrong is how a "better" radar ends up less sensitive than
+        // the one it replaces, so the number the manifest has to use is fixed here.
+        const size_t both = count_win(150.0, -35.0, 10.0, 60000, 0.0, 0.0);
+        const double both_dilution = static_cast<double>(base) / static_cast<double>(both);
+        check(both_dilution > 4.8 && both_dilution < 6.5,
+              "widening azimuth 60->150 AND elevation 20->45 costs ~5.6x, not ~2.25+2.5");
+        const size_t both_comp = count_win(150.0, -35.0, 10.0, 337500, 0.0, 0.0);
+        const double both_restored = static_cast<double>(both_comp) / static_cast<double>(base);
+        check(both_restored > 0.85 && both_restored < 1.15,
+              "scaling pps by the solid-angle ratio restores it on both axes too");
+        std::printf("  [#13] wide fit: el+az widened=%zu  (x%.2f dilution)  "
+                    "@5.625x pps=%zu\n", both, both_dilution, both_comp);
+
+        // The coverage that motivates #13: traffic 45 deg off the nose -- the
+        // bearing to an aircraft converging on a landing point from the side.
+        check(count_win(60.0, -35.0, 10.0, 600000, -45.0, -5.0) == 0,
+              "a target 45 deg off the nose is invisible to the 60 deg azimuth sector");
+        check(count_win(150.0, -35.0, 10.0, 60000, -45.0, -5.0) > 0,
+              "the 150 deg sector sees it");
+    }
+
+    // --- does a moving-target filter remove ground clutter? (#7) ------------
+    // The other cost of looking down is the ground, and the usual answer is
+    // "the Doppler filter deals with it". That answer holds only while the
+    // aircraft is stationary. Static ground seen from a radar moving at v has a
+    // closing rate of v*cos(el) -- indistinguishable from a real target -- so
+    // the filter that saved S-7 in a room full of walls does NOT save a moving
+    // aircraft from its own ground return. Pinned here because the live
+    // measurement can only be taken while hovering.
+    {
+        auto doppler_of_ground = [](double own_speed, double el_deg) {
+            radar::RadarConfig c {};
+            c.range = 30.0;
+            c.horizontal_fov_deg = 4.0;             // a pencil beam at the patch
+            c.elevation_start_deg = el_deg - 2.0;
+            c.elevation_end_deg = el_deg + 2.0;
+            c.points_per_second = 200;
+            c.noise_seed = 5U;
+            c.output.update_rate_hz = 1.0;
+            auto caster = std::make_shared<PatchMockRayCaster>(6.0, 0.0, el_deg, 5.0);
+            radar::RadarSensor s(caster);
+            s.SetConfig(c);
+            backend::SensorState st = forward_state();
+            st.linear_velocity = Vector3(own_speed, 0, 0);   // flying forward
+            radar::RadarScanFrame f {};
+            s.Scan(st, f);
+            double sum = 0.0;
+            for (const auto& d : f.detections) sum += d.velocity;
+            return f.detections.empty() ? 0.0 : sum / static_cast<double>(f.detections.size());
+        };
+
+        const double hovering = doppler_of_ground(0.0, -30.0);
+        close_to(hovering, 0.0, 1e-3,
+                 "hovering: static ground reads as static (Doppler ~ 0)");
+
+        // 1 m/s forward, ground 30 deg below: -v*cos(30) = -0.866 m/s.
+        const double moving = doppler_of_ground(1.0, -30.0);
+        close_to(moving, -std::cos(rmath::DegToRad(30.0)), 1e-2,
+                 "flying: the same ground closes at v*cos(el)");
+        check(std::fabs(moving) > 0.05,
+              "which is well above any sane moving-target threshold -- the "
+              "Doppler filter does NOT remove ground clutter from a moving aircraft");
+        std::printf("  [#7] ground Doppler at el -30 deg: hovering %.3f m/s, "
+                    "1 m/s forward %.3f m/s\n", hovering, moving);
     }
 
     std::printf("\n%d/%d checks passed\n", g_checks - g_failures, g_checks);
