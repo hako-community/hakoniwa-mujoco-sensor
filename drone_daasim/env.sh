@@ -14,6 +14,23 @@ export GODOT_DRONE="${GODOT_DRONE:-$_HAKO_ROOT/hakoniwa-godot-drone}"
 # 2026-08 の 2 層化で、sensor が依存する下位レイヤ（primitive_types.hpp 等）。
 export RUNTIME_REPO="${RUNTIME_REPO:-$_HAKO_ROOT/hakoniwa-mujoco-runtime}"
 
+# ★ 2026-08-21（P1・案 B）: **DAA のシナリオと採点は Companion リポジトリへ移した**。
+#   ここ（mujoco-sensor）に残るのは **センシングと箱庭スタックの起動**だけである
+#   （決定 §10-2「sensor はセンシング専業、Companion は判断」）。
+#   移したもの: daa_metrics.py / scenario_*.py / two_drone_avoid.py / m6_avoid.py /
+#               verify_b1.py / probe_b1_cone.py
+#   ★ 残した `daa_common.py` は **センサ配線（radar_fit / scan / PDU / fly_to）が本体**で、
+#     radar_fit_test.py と probe_elevation.py も使う。シナリオ側からは import で参照する。
+export COMPANION_REPO="${COMPANION_REPO:-$_HAKO_ROOT/hakoniwa-drone-companion}"
+export SCENARIOS_DIR="${SCENARIOS_DIR:-$COMPANION_REPO/scenarios}"
+if [ ! -d "$SCENARIOS_DIR" ]; then
+  echo "WARN: DAA シナリオが見つかりません: $SCENARIOS_DIR" >&2
+  echo "      hakoniwa-drone-companion を clone するか SCENARIOS_DIR を明示してください。" >&2
+fi
+# ★ シナリオは `import daa_common`（ここ）と `import daa_metrics`（あちら）の両方を使う。
+#   どちらも素の import なので、**両方の親を PYTHONPATH に入れる**こと。
+export PYTHONPATH="$_HERE:$SCENARIOS_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
 # センサー用環境ジオメトリ（env.xml / env.tscn / *.obb.json）。
 # 2026-08 に hakoniwa-envsim-sensor は廃止され hakoniwa-simenv-data に統合された。
 # ディレクトリも examples/<name>/ から examples/sensor_envs/<name>/ に移動している。

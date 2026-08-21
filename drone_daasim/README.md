@@ -1,5 +1,27 @@
 # drone_daasim — ドローン DAA（Detect And Avoid）シミュレーション一式
 
+> ★★ **2026-08-21（P1・案 B）: DAA の「判断と採点」は
+> [`hakoniwa-drone-companion`](../../hakoniwa-drone-companion) へ移した。**
+> 決定 §10-2「**sensor はセンシング専業、Companion は判断**」による。
+> ここに残っているのは **センサ配線と箱庭スタックの起動手順**である。
+>
+> | 移したもの（→ `hakoniwa-drone-companion/scenarios/`） | ここに残したもの |
+> |---|---|
+> | `daa_metrics.py`（Well Clear・tau・採点） | ★ `daa_common.py`（**radar_fit / scan / PDU / fly_to** が本体。`radar_fit_test.py` と `probe_elevation.py` も使う） |
+> | `scenario_b1_faceoff.py`, `scenario_s2`〜`s8` | `env.sh` / `*_run.sh` / `cleanup.sh` / `takeoff.py` / `read_pos.py` |
+> | `two_drone_avoid.py`, `m6_avoid.py`, `verify_b1.py`, `probe_b1_cone.py` | `lidar_sensor_asset.py`, `m6_sensor_bridge.py`, `radar_fit_test.py`, `probe_elevation.py` |
+>
+> ★ **`env.sh` が `SCENARIOS_DIR` と `PYTHONPATH` を用意する**ので、ランナー `.sh` の
+> 使い方は変わらない。Companion リポジトリが無い場所にあるなら `COMPANION_REPO` か
+> `SCENARIOS_DIR` で指定する（無いと `env.sh` が WARN を出す）。
+>
+> ★ **DAA の正は C++**（`hakoniwa-drone-companion/include/core/`）。`daa_metrics.py` は
+> **従**であり、食い違ったら C++ が正しい。両者は ctest `daa_conformance` で突き合わせている。
+>
+> ★ **残っている宿題（P1-b）**: `daa_common.py` の `classify_encounter` /
+> `role_from_bearing` / `SpeedTracker` は DAA の規則であって、C++ の
+> `core/rules_of_the_air.hpp` と同じものの 2 個目の実装である。ファイルを割る作業は未了。
+
 > 旧名 `localsim`。2026-08-11 に `drone_daasim/` へ改称し、**git 管理下に入れた**
 > （以前は `.gitignore` 対象で、リポジトリの再クローン時に消失する事故があったため）。
 

@@ -33,7 +33,7 @@ rec "$OUT/02_avoid_single_radar.mp4" \
   "2. Avoidance - single forward radar (60 deg)" \
   "S-1 head-on. Rule 182: both alter course to their own right. Well Clear 1.25 m" \
   "bash $HERE/two_drone_viz_run.sh window radar oblique 1.0 noground" \
-  "$PYENV_PY $HERE/two_drone_avoid.py" \
+  "$PYENV_PY $SCENARIOS_DIR/two_drone_avoid.py" \
   "$SECS"
 
 # --- 3) where the forward sector breaks -------------------------------------
@@ -41,7 +41,7 @@ rec "$OUT/03_crossing_60deg_fails.mp4" \
   "3. LIMIT of a 60 deg sector - 90 deg crossing" \
   "On a collision course the bearing stays near 45 deg: outside the FOV, never detected" \
   "bash $HERE/two_drone_viz_run.sh window radar top 0.5 noground" \
-  "S2_START=4.0 $PYENV_PY $HERE/scenario_s2_converging.py" \
+  "S2_START=4.0 $PYENV_PY $SCENARIOS_DIR/scenario_s2_converging.py" \
   "$SECS"
 
 # --- 4) the same encounter with 360 deg azimuth -----------------------------
@@ -49,7 +49,7 @@ rec "$OUT/04_crossing_360deg.mp4" \
   "4. Same crossing with 360 deg azimuth" \
   "Rule 181: the aircraft that sees the other on its right gives way; the other holds course" \
   "A2_MANIFEST=$CFG/drone-a2-sensors-360.json bash $HERE/two_drone_viz_run.sh window radar top 0.5 noground" \
-  "S2_START=4.0 $PYENV_PY $HERE/scenario_s2_converging.py" \
+  "S2_START=4.0 $PYENV_PY $SCENARIOS_DIR/scenario_s2_converging.py" \
   "$SECS"
 
 # --- 5) two radars on one aircraft ------------------------------------------
@@ -57,7 +57,7 @@ rec "$OUT/05_dual_radar_overtaking.mp4" \
   "5. Two radars per aircraft - forward 60 deg + rear sector" \
   "S-3 overtaking. The rear sector (az 150..210) covers the blind spot behind each aircraft" \
   "A2_DUAL_RADAR=1 A2_MANIFEST=$CFG/drone-a2-sensors-dual.json bash $HERE/two_drone_viz_run.sh window radar top 0.45 noground" \
-  "S3_GAP=3.0 $PYENV_PY $HERE/scenario_s3_overtaking.py" \
+  "S3_GAP=3.0 $PYENV_PY $SCENARIOS_DIR/scenario_s3_overtaking.py" \
   "$SECS"
 
 echo

@@ -129,7 +129,7 @@ done
 
 echo
 _say "起動完了。native=$DRONE_PID bridge(Drone)=$B1 bridge(Drone1)=$B2"
-_say "  回避   : $PYENV_PY $HERE/two_drone_avoid.py   (2機正面衝突回避: 相互検知→各機右へ回避→ゴール, RESULT:PASS)"
-_say "  検証   : $PYENV_PY $HERE/scenario_b1_faceoff.py   (2機を対面させ相互検知＋接近Doppler)"
-_say "  (旧)   : $PYENV_PY $HERE/verify_b1.py   ※yaw未指定だと両機+x向きで後方機しか相手を見ない"
+_say "  回避   : $PYENV_PY $SCENARIOS_DIR/two_drone_avoid.py   (2機正面衝突回避: 相互検知→各機右へ回避→ゴール, RESULT:PASS)"
+_say "  検証   : $PYENV_PY $SCENARIOS_DIR/scenario_b1_faceoff.py   (2機を対面させ相互検知＋接近Doppler)"
+_say "  (旧)   : $PYENV_PY $SCENARIOS_DIR/verify_b1.py   ※yaw未指定だと両機+x向きで後方機しか相手を見ない"
 _say "  片付け : bash $HERE/cleanup.sh"

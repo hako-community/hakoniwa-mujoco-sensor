@@ -28,7 +28,7 @@
 #            A2_MANIFEST   (Drone)   A2_MANIFEST2 (Drone1, defaults to A2_MANIFEST)
 #          Both are handed to Godot as HAKO_SENSOR_MANIFEST / HAKO_SENSOR_MANIFEST2 so
 #          the drawn window matches what each aircraft actually carries.
-#          Move : $PYENV_PY drone_daasim/scenario_b1_faceoff.py     (face-off + approach)
+#          Move : $PYENV_PY $SCENARIOS_DIR/scenario_b1_faceoff.py     (face-off + approach)
 #          Stop : bash cleanup.sh
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -159,7 +159,7 @@ done
 
 echo
 _say "起動完了。native=$DRONE_PID godot=$GODOT_PID bridge=$B1/$B2"
-_say "  衝突回避 : $PYENV_PY $HERE/two_drone_avoid.py   (2機正面→相互検知→各機右へ回避→ゴール)"
-_say "  対面+接近 : $PYENV_PY $HERE/scenario_b1_faceoff.py"
+_say "  衝突回避 : $PYENV_PY $SCENARIOS_DIR/two_drone_avoid.py   (2機正面→相互検知→各機右へ回避→ゴール)"
+_say "  対面+接近 : $PYENV_PY $SCENARIOS_DIR/scenario_b1_faceoff.py"
 _say "  表示切替  : L=LiDAR / R=Radar / N=なし   C=カメラ切替   +/- ズーム"
 _say "  片付け    : bash $HERE/cleanup.sh"
