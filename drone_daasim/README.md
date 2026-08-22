@@ -18,9 +18,20 @@
 > ★ **DAA の正は C++**（`hakoniwa-drone-companion/include/core/`）。`daa_metrics.py` は
 > **従**であり、食い違ったら C++ が正しい。両者は ctest `daa_conformance` で突き合わせている。
 >
-> ★ **残っている宿題（P1-b）**: `daa_common.py` の `classify_encounter` /
-> `role_from_bearing` / `SpeedTracker` は DAA の規則であって、C++ の
-> `core/rules_of_the_air.hpp` と同じものの 2 個目の実装である。ファイルを割る作業は未了。
+> ★★ **P1-b 完了（2026-08-22）**: `daa_common.py` にあった `classify_encounter` /
+> `role_from_bearing` と役割の定数は、**DAA の規則**であって C++
+> `core/rules_of_the_air.hpp` と同じものの 2 個目の実装だったので、
+> `hakoniwa-drone-companion/scenarios/daa_rules.py` へ移した。
+> 使う側は `import daa_rules` に変える（`env.sh` の `PYTHONPATH` はそのままで通る）。
+>
+> ★ **`SpeedTracker` はここに残した**。あれは規則ではなく**自機状態の推定**で、
+> C++ の対応物も `rules_of_the_air.hpp` ではなく `companion_app.cpp` のインライン EMA である。
+> 何より `probe_elevation.py`（センサ側）が使っているので、移すと
+> **mujoco-sensor が companion に依存する**ことになり依存の向きが逆になる。
+>
+> ★★ **移しただけでは負債は減らない**（重複の置き場所が変わるだけ）ので、
+> 移設先に ctest `rules_conformance` を付けた。C++（正）と Python（従）に同じ入力を食わせ、
+> **誰が譲るかの符号**（相手が右 = az<0 → こちらが譲る）まで毎回突き合わせる。
 
 > 旧名 `localsim`。2026-08-11 に `drone_daasim/` へ改称し、**git 管理下に入れた**
 > （以前は `.gitignore` 対象で、リポジトリの再クローン時に消失する事故があったため）。

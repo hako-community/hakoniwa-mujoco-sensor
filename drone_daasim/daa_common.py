@@ -724,56 +724,40 @@ class Sampler(threading.Thread):
         self.join(timeout=1.0)
 
 
-# --- right-of-way rules: 航空法施行規則 §181, §182, §185, §186 ----------------
-HEAD_ON = "head-on §182"          # both alter course to the right
-GIVE_WAY = "give way §181"        # sees the other on its RIGHT -> yields
-STAND_ON = "stand on §181/§186"   # sees the other on its LEFT -> holds course and speed
-OVERTAKE = "overtake §185"        # passes on the RIGHT of the aircraft ahead
-
-HEAD_ON_HALF_DEG = 15.0           # "正面またはこれに近い角度" -- within this is head-on
-
-
-def role_from_bearing(az_deg, closing, overtaking=False):
-    """Pick the rule that applies, from what our own radar sees.
-
-    This needs only the bearing of the target in our body frame, which is what
-    makes it implementable: §181 asks whether the other aircraft is on our
-    right, not what its heading is.
-    """
-    if az_deg is None or not closing:
-        return None
-    if overtaking:
-        return OVERTAKE
-    if abs(az_deg) <= HEAD_ON_HALF_DEG:
-        return HEAD_ON
-    return GIVE_WAY if az_deg < 0.0 else STAND_ON
-
-
-def classify_encounter(az_deg, closure, own_speed):
-    """Same as role_from_bearing, but tells head-on from overtaking.
-
-    A target dead ahead is §182 (head-on) or §185 (overtaking) depending on
-    which way it is travelling, and the radar does not measure the target's
-    heading. The closure rate does the work instead: closing at roughly twice
-    our own speed means the other aircraft is coming at us, while a target we
-    are creeping up on closes at much less than our own speed. This is the
-    cheapest form of the "recognition" step that ISO 15964 3.8 asks for.
-    """
-    if az_deg is None or closure is None or closure <= 0.0:
-        return None
-    if abs(az_deg) > HEAD_ON_HALF_DEG:
-        return GIVE_WAY if az_deg < 0.0 else STAND_ON
-    # The natural threshold is our OWN speed, not an arbitrary fraction of it:
-    #   same direction  -> the target recedes as we advance -> closure < own
-    #   opposing        -> both speeds add                  -> closure > own
-    # 0.9 leaves margin for the noise in a Monte-Carlo range measurement.
-    if own_speed and own_speed > 0.05 and closure < 0.9 * own_speed:
-        return OVERTAKE
-    return HEAD_ON
+# --- 遭遇の分類（施行規則 §181/§182/§185/§186）は **ここには無い** ---------
+#
+# ★ P1-b（2026-08-22）で `hakoniwa-drone-companion/scenarios/daa_rules.py` へ移した。
+#   `role_from_bearing` / `classify_encounter` / `HEAD_ON` ほかの定数はそちらにある。
+#
+# ★★ 移した理由: あれは **DAA の規則**であって、C++
+#   `hakoniwa-drone-companion/include/core/rules_of_the_air.hpp` と**同じものの
+#   2 個目の実装**だった。このファイルの本体は radar_fit / scan / PDU / fly_to という
+#   **センサ配線**で、規則とは寿命も持ち主も違う（決定 §10-2: sensor はセンシング専業）。
+#
+#   使う側は `import daa_rules` に変えること:
+#       import daa_rules
+#       role = daa_rules.role_from_bearing(az, closing=True)
+#
+# ★ 移設先には `../eval/rules_conformance.py`（ctest `rules_conformance`）が付いていて、
+#   C++（正）と Python（従）に同じ入力を食わせて毎回突き合わせている。
+#   ★★ **割っただけでは負債は減らない**（重複の置き場所が変わるだけ）ので、それが本体。
 
 
 class SpeedTracker:
-    """Own ground speed from successive true positions."""
+    """Own ground speed from successive true positions.
+
+    ★ P1-b でここに **残した**（規則 2 つは companion へ移した）。理由は 2 つ:
+
+      1. これは **規則ではなく自機状態の推定**である。施行規則のどの条文とも対応せず、
+         C++ の対応物も `rules_of_the_air.hpp` ではなく `apps/companion_app.cpp` の
+         インラインの EMA（同じ alpha=0.5）である。
+      2. ★★ **`probe_elevation.py`（センサ側のプローブ）が使っている**。
+         これを companion へ移すと **mujoco-sensor が companion に依存する**ことになり、
+         依存の向きが逆になる（決定 §10-2 が壊れる）。
+
+    ★ ただし「C++ にも同じ EMA がインラインで書かれている」という **小さい重複は残っている**。
+      規則の重複（P1-b で解消）とは別件として、companion 側の README に記録してある。
+    """
 
     def __init__(self, alpha=0.5):
         self.alpha, self._prev, self.speed = alpha, None, None
