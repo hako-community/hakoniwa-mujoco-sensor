@@ -27,6 +27,7 @@
 #include "sensors/lidar/lidar3d_sensor.hpp"
 #include "sensors/lidar/lidar_scan_sensor.hpp"
 #include "sensors/radar/radar_sensor.hpp"
+#include "sensors/radar/radar_config_json.hpp"   // manifest params -> RadarConfig (1 か所)
 #include "sensors/radar/radar_math.hpp"   // RadarEquationRange (link budget -> ref range)
 
 // converters (frame -> HakoCpp) and registry serializers (cpp2pdu)
@@ -268,52 +269,10 @@ namespace hako::robots::runtime
                 return std::make_unique<detail::Lidar2DComponent>(std::move(caster), c, id, pdu_name, pdu_robot, mount);
             }
             if (type == "radar") {
-                sensor::radar::RadarConfig c {};
-                c.frame_id = p.value("frame_id", c.frame_id);
-                c.range = p.value("range", c.range);
-                c.horizontal_fov_deg = p.value("horizontal_fov_deg", c.horizontal_fov_deg);
-                c.vertical_fov_deg = p.value("vertical_fov_deg", c.vertical_fov_deg);
-                c.points_per_second = p.value("points_per_second", c.points_per_second);
-                // Optional asymmetric window (e.g. a rear sector: 150 .. 210).
-                // Absent keys leave NaN, which means "use the symmetric FOV".
-                c.azimuth_start_deg = p.value("azimuth_start_deg", c.azimuth_start_deg);
-                c.azimuth_end_deg = p.value("azimuth_end_deg", c.azimuth_end_deg);
-                c.elevation_start_deg = p.value("elevation_start_deg", c.elevation_start_deg);
-                c.elevation_end_deg = p.value("elevation_end_deg", c.elevation_end_deg);
-                c.detection_reference_range =
-                    p.value("detection_reference_range", c.detection_reference_range);
-                c.detection_falloff_exp =
-                    p.value("detection_falloff_exp", c.detection_falloff_exp);
-                // Radar equation. Given a complete link budget, sensitivity is
-                // expressed physically and detection_reference_range is DERIVED --
-                // it then acts as a fallback for manifests that predate this.
-                c.tx_power_w = p.value("tx_power_w", c.tx_power_w);
-                c.antenna_gain_dbi = p.value("antenna_gain_dbi", c.antenna_gain_dbi);
-                c.wavelength_m = p.value("wavelength_m", c.wavelength_m);
-                c.min_detectable_signal_w =
-                    p.value("min_detectable_signal_w", c.min_detectable_signal_w);
-                c.reference_rcs_m2 = p.value("reference_rcs_m2", c.reference_rcs_m2);
-                {
-                    const double derived = sensor::radar::math::RadarEquationRange(
-                        c.tx_power_w, c.antenna_gain_dbi, c.wavelength_m,
-                        c.reference_rcs_m2, c.min_detectable_signal_w);
-                    if (derived > 0.0) {
-                        c.detection_reference_range = derived;
-                    }
-                }
-                {
-                    // Unknown names fall back to the default rather than failing the
-                    // load: a manifest written for a newer build still runs here.
-                    const std::string dist = p.value("ray_distribution", std::string("uniform_angle"));
-                    if (dist == "uniform_solid_angle") {
-                        c.ray_distribution = sensor::radar::RayDistribution::UniformSolidAngle;
-                    } else if (dist == "boresight_weighted") {
-                        c.ray_distribution = sensor::radar::RayDistribution::BoresightWeighted;
-                    } else {
-                        c.ray_distribution = sensor::radar::RayDistribution::UniformAngle;
-                    }
-                }
-                c.noise_seed = p.value("noise_seed", c.noise_seed);
+                // ★ 写しは `sensors/radar/radar_config_json.hpp` の 1 か所に集約した
+                //   （2026-08-28）。ここで並べ直さないこと —— 消費側が 2 つある以上、
+                //   並べ直した瞬間に片方だけが新しいキーを読む状態に戻る。
+                const sensor::radar::RadarConfig c = sensor::radar::RadarConfigFromJson(p);
                 return std::make_unique<detail::RadarComponent>(std::move(caster), c, id, pdu_name, pdu_robot, mount);
             }
             return nullptr;  // unknown type -> skipped by runtime
