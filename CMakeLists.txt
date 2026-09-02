@@ -62,8 +62,11 @@ set(NLOHMANN_JSON_INCLUDE_DIR "" CACHE PATH "Directory containing nlohmann/json.
 #      ライブラリを要らない利用者のために残すが、優先はしない）
 if(NOT MUJOCO_INCLUDE_DIR)
     foreach(_root
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../.cache/deps/mujoco_bin-src"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../.cache/deps/mujoco_bin-src"
+        # ★★★★ 2026-09-02: **このリポジトリが自分で持つものを最優先**（setup.sh が置く）。
+        #   ★★★ それまでの先頭は `../../.cache/deps/mujoco_bin-src` で、実体は
+        #     **ドローンの木の外にある別プロジェクト（ヒューマノイド）のキャッシュ**だった。
+        #     あちらを掃除した瞬間にこのリポジトリはビルド不能になる。**単体で成り立たせる。**
+        "${CMAKE_CURRENT_SOURCE_DIR}/external_library/mujoco"
         "/usr/local"
         "/opt/mujoco")
         if(EXISTS "${_root}/include/mujoco/mujoco.h" AND EXISTS "${_root}/lib/libmujoco.so")
@@ -74,8 +77,11 @@ if(NOT MUJOCO_INCLUDE_DIR)
     endforeach()
 endif()
 if(NOT MUJOCO_INCLUDE_DIR)
+    # ★★★★ 2026-09-02: `../../sensor/mujoco/include` を候補から外した。
+    #   ★★★ **そこは 3.10.0-dev のソースチェックアウトで、記録に残っている事故
+    #     （3.10.0-dev ヘッダ ＋ 3.9.0 ライブラリ → 実行時 SEGV）の当事者そのもの**である。
+    #     「ライブラリが要らない利用者のために残す」より、踏む危険のほうが大きい。
     foreach(_cand
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../sensor/mujoco/include"
         "/usr/local/include")
         if(EXISTS "${_cand}/mujoco/mujoco.h")
             set(MUJOCO_INCLUDE_DIR "${_cand}")
@@ -86,11 +92,15 @@ endif()
 
 # nlohmann/json の場所。-DNLOHMANN_JSON_INCLUDE_DIR で明示指定するのが基本で、
 # 未指定のときだけ下の順で探す。
-#   1) 親リポの third_party/ に submodule として並んでいる場合（hakoniwa-humanoid の構成）
-#   2) システムに入っている場合（Debian/Ubuntu の nlohmann-json3-dev など）
+#   1) ★★★★ このリポジトリが自分で持つもの（submodule。setup.sh が同期する）
+#   2) 親リポの third_party/ に submodule として並んでいる場合（hakoniwa-humanoid の構成）
+#   3) システムに入っている場合（Debian/Ubuntu の nlohmann-json3-dev など）
+# ★★★ 2026-09-02: 先頭にあった `../nlohmann-json/single_include` を外した。
+#   実体は **hakoniwa-drone-pro/thirdparty/nolman**（PRIVATE。しかも「使わない」と
+#   決めたリポジトリ）への symlink で、**版が記録に残らず、単体では configure も通らなかった**。
 if(NOT NLOHMANN_JSON_INCLUDE_DIR)
     foreach(_cand
-        "${CMAKE_CURRENT_SOURCE_DIR}/../nlohmann-json/single_include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/external_library/nolman/single_include"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/nlohmann-json/single_include"
         "/usr/local/include"
         "/usr/include")

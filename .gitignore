@@ -25,3 +25,17 @@ examples/envsim_sensor_a2/sensing_switch_demo
 examples/envsim_sensor_a2/sensor_bridge_multi
 examples/envsim_sensor_a2/m6_sensor_bridge
 examples/envsim_sensor_a2/check_radar_equation
+
+# ★★★★ 2026-09-02: **外部依存はこのリポジトリが自分で持つ**（他リポジトリの木を指さない）。
+#   それまでは configure 時に
+#     * MuJoCo  -> `../../.cache/deps/mujoco_bin-src`（**ドローンの木の外**にある
+#                  別プロジェクト（ヒューマノイド）のキャッシュへの symlink）
+#     * nlohmann -> `../nlohmann-json`（**hakoniwa-drone-pro/thirdparty への symlink**。
+#                  drone-pro は PRIVATE で、しかも「使わない」と決めたリポジトリ）
+#   を拾っていた。★★★ **単体でビルドできないのは意味がない。**
+#   → nolman は submodule（版が git に残る）、MuJoCo は `mujoco.lock` の版と SHA256 で取得。
+external_library/*
+!external_library/README.md
+!external_library/setup.sh
+!external_library/mujoco.lock
+!external_library/nolman

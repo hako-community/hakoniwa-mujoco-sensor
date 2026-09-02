@@ -1,0 +1,17 @@
+# MuJoCo のバイナリリリースの固定（external_library/setup.sh が読む）。
+#
+# ★★★★ **submodule にしていないのはここだけ**である。理由:
+#   submodule で取れるのは**ソース**で、我々がリンクする `libmujoco.so` は付いてこない。
+#   自前ビルドに戻すと「ヘッダとライブラリを別々に用意する」形になり、
+#   ★★★ **版が食い違うとビルドは通って実行時に SEGV する**という地雷の入り口へ戻る。
+#   → 版と SHA256 をここに固定し、公式のリリース tarball を取って**必ず検証する**。
+#
+# ★★ 版を上げるときは、`hakoniwa-mujoco-sensor` / `hakoniwa-mujoco-runtime` と
+#   Android 用のソース（`hakoniwa/mujoco`）も**同時に**上げること。
+#   CMake は `libmujoco.so.*` を glob して版を突き合わせるが、
+#   ★ **版番号なし（Android）と Windows の dll は黙って素通りする**ので、検査に頼り切らない。
+version = 3.9.0
+url     = https://github.com/google-deepmind/mujoco/releases/download/3.9.0/mujoco-3.9.0-linux-x86_64.tar.gz
+sha256  = d11f281540d0d1844e2923bf43b6fff5ad186ec55927a8dae0eb26b9e579eed2
+# 展開後に外側のディレクトリ名（external_library/mujoco へ改名する）
+strip   = mujoco-3.9.0
