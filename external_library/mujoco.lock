@@ -1,17 +1,40 @@
 # MuJoCo のバイナリリリースの固定（external_library/setup.sh が読む）。
 #
 # ★★★★ **submodule にしていないのはここだけ**である。理由:
-#   submodule で取れるのは**ソース**で、我々がリンクする `libmujoco.so` は付いてこない。
-#   自前ビルドに戻すと「ヘッダとライブラリを別々に用意する」形になり、
+#   submodule で取れるのは**ソース**で、我々がリンクする `libmujoco.so` / `mujoco.dll` は
+#   付いてこない。自前ビルドに戻すと「ヘッダとライブラリを別々に用意する」形になり、
 #   ★★★ **版が食い違うとビルドは通って実行時に SEGV する**という地雷の入り口へ戻る。
-#   → 版と SHA256 をここに固定し、公式のリリース tarball を取って**必ず検証する**。
+#   → 版と SHA256 をここに固定し、公式のリリースを取って**必ず検証する**。
+#
+# ★★★★ **プラットフォームごとに別の書庫である**（2026-09-02 に対応）。
+#   ★★★ **Windows の zip には最上位ディレクトリが無い**（`bin/` `include/` が直接入る）ので
+#     `strip` が空になる。Linux の tar.gz は `mujoco-<版>/` に包まれている。
+#     ★★ ここを取り違えると、Windows に **Linux 版が入って `mujoco.dll` が無い**という
+#     分かりにくい壊れ方をする。
 #
 # ★★ 版を上げるときは、`hakoniwa-mujoco-sensor` / `hakoniwa-mujoco-runtime` と
 #   Android 用のソース（`hakoniwa/mujoco`）も**同時に**上げること。
 #   CMake は `libmujoco.so.*` を glob して版を突き合わせるが、
 #   ★ **版番号なし（Android）と Windows の dll は黙って素通りする**ので、検査に頼り切らない。
+#
+# ★ sha256 は upstream が公開している `<書庫名>.sha256` の値をそのまま写している。
 version = 3.9.0
-url     = https://github.com/google-deepmind/mujoco/releases/download/3.9.0/mujoco-3.9.0-linux-x86_64.tar.gz
-sha256  = d11f281540d0d1844e2923bf43b6fff5ad186ec55927a8dae0eb26b9e579eed2
-# 展開後に外側のディレクトリ名（external_library/mujoco へ改名する）
-strip   = mujoco-3.9.0
+
+# --- Linux x86_64 ---
+linux_x86_64.url    = https://github.com/google-deepmind/mujoco/releases/download/3.9.0/mujoco-3.9.0-linux-x86_64.tar.gz
+linux_x86_64.sha256 = d11f281540d0d1844e2923bf43b6fff5ad186ec55927a8dae0eb26b9e579eed2
+linux_x86_64.strip  = mujoco-3.9.0
+
+# --- Linux aarch64（Jetson / ARM ボード） ---
+linux_aarch64.url    = https://github.com/google-deepmind/mujoco/releases/download/3.9.0/mujoco-3.9.0-linux-aarch64.tar.gz
+linux_aarch64.sha256 = 47f295e1c7bef45a6f0d26108b275865d3097012bd2b02f5938d7adfade0d8da
+linux_aarch64.strip  = mujoco-3.9.0
+
+# --- Windows x86_64（★ zip は最上位ディレクトリが無いので strip は空） ---
+windows_x86_64.url    = https://github.com/google-deepmind/mujoco/releases/download/3.9.0/mujoco-3.9.0-windows-x86_64.zip
+windows_x86_64.sha256 = 544f44a8a7df3e94648a7eaf41500f4456eb59f9f01df3ec2cfb03bdbf5c2bb9
+windows_x86_64.strip  =
+
+# --- macOS ---
+# ★ 公式は .dmg でしか配っていない（自動展開に向かない）。
+#   macOS で使うときは手で `external_library/mujoco/` に置き、版を 3.9.0 に合わせること。
