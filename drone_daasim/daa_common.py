@@ -693,10 +693,32 @@ def connect(names):
     the log has to say which one it got.
     """
     import hakoniwa_pdu.apps.drone.hakosim as hakosim
+    # ★★★★ O-11（2026-09-05）: **pdudef は「いま動いているスタックのもの」を使う。**
+    #   ★★★★ ここが `CFG`（このファイルの既定 ＝ 旧 config2）決め打ちで、
+    #     A2_PDUDEF で起動したスタックに対しても**別のファイルのチャネル表**を読んでいた。
+    #     いまは標準の並びが偶然一致していたので気づけなかった。
+    pdudef = _pdudef_path()
     clients = {}
+    first = None
     for name in names:
-        c = hakosim.MultirotorClient(CFG, name)
-        c.confirmConnection()
+        c = hakosim.MultirotorClient(pdudef, name)
+        # ★★★★ O-11: **confirmConnection() は最初の 1 回だけ。**
+        #   ★★★★ 2 回目の `hakopy.init_for_external()` は False を返し、
+        #     そのクライアントの PDU マネージャが**初期化されないまま残る**。
+        #     すると `simGetVehiclePose()` が None を返し、hakosim の中で
+        #     `'NoneType' object has no attribute 'orientation'` で落ちる（実測）。
+        #   ★★★ **間欠的に見えるのはこのため** —— 先に別のクライアントが
+        #     初期化を終えていれば動くが、順序が変わると落ちる。
+        #   ★★ 2 機目以降は**同じマネージャを使う**（箱庭の外部参加は 1 プロセス 1 接続）。
+        if first is None:
+            if not c.confirmConnection():
+                raise RuntimeError(
+                    "confirmConnection() が失敗した。"
+                    "hako-cmd start の後に起動しているか、pdudef が合っているかを見ること: "
+                    + str(pdudef))
+            first = c
+        else:
+            c.pdu_manager = first.pdu_manager
         c.enableApiControl(True)
         c.armDisarm(True)
         clients[name] = c
