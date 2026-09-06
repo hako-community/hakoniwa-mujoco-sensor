@@ -770,6 +770,72 @@ class Sampler(threading.Thread):
         self.join(timeout=1.0)
 
 
+class WatchThread(threading.Thread):
+    """センサの健全性を **指令ループとは独立に**見張る（2026-09-06・A）。
+
+    ★★★★ なぜスレッドなのか: それまで S-8 は **1 刻みに 1 回**しか `FitWatch` を
+      更新しておらず、実寸では刻みが 2.5 s なので **1.2 s の時間切れを解像できなかった**
+      （実測の遅れ 6.22 s ＝ 約 2.5 刻み）。★★★ **しきい値を刻みに合わせて緩めるのは逃げ**で、
+      直すべきは「監視が指令の都合で止まっていること」のほうである。
+
+    ★★★ 実機の監視器は飛行の指令とは無関係に回り続ける。ここも同じ形にする。
+      ★★ `Sampler` と同じ daemon スレッド。PDU の読みはスレッドから行ってよい
+        （`Sampler` が既にそうしている）。
+
+    ★★★★ **申告した瞬間の時刻を残す**（`stale_since`）—— あとから
+      「いつ気づいたか」を刻みの粒度ではなく**監視の粒度**で言えるようにするため。
+    """
+
+    def __init__(self, robot, timeout_s=1.5, period=0.2):
+        super().__init__(daemon=True)
+        self.robot = robot
+        self.watch = FitWatch(timeout_s)
+        self.period = period
+        self._halt = threading.Event()
+        #: 初めて「古い」と申告した時刻（time.time()）。★ 一度立ったら下げない。
+        self.stale_since = None
+        #: 最後に「全部新しい」と見えた時刻。★ 復旧の判定に使う。
+        self.fresh_since = None
+
+    def run(self):
+        while not self._halt.is_set():
+            try:
+                self.watch.update(time.time(), self.robot)
+            except Exception:       # noqa: BLE001  ★ 監視が例外で死ぬと気づけない
+                pass
+            else:
+                now = time.time()
+                if self.watch.stale and self.stale_since is None:
+                    self.stale_since = now
+                if not self.watch.stale:
+                    self.fresh_since = now
+            time.sleep(self.period)
+
+    # ★ 呼ぶ側は `FitWatch` と同じ顔で使える（差し替えやすくするため）。
+    @property
+    def stale(self):
+        return self.watch.stale
+
+    @property
+    def fresh(self):
+        return self.watch.fresh
+
+    @property
+    def blind(self):
+        return self.watch.blind
+
+    @property
+    def degraded(self):
+        return self.watch.degraded
+
+    def summary(self):
+        return self.watch.summary()
+
+    def stop(self):
+        self._halt.set()
+        self.join(timeout=1.0)
+
+
 # --- 遭遇の分類（施行規則 §181/§182/§185/§186）は **ここには無い** ---------
 #
 # ★ P1-b（2026-08-22）で `hakoniwa-drone-companion/scenarios/daa_rules.py` へ移した。
