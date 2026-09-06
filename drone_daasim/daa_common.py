@@ -43,6 +43,8 @@ _missing_channels = set()
 POS_CH, POS_SIZE = 1, 72                       # geometry_msgs/Twist
 POS_X_OFF, POS_Y_OFF, POS_Z_OFF = 24, 32, 40   # 9 doubles; linear x,y,z at index 3,4,5
 POS_YAW_OFF = 64                               # angular.z, radians
+VEL_CH, VEL_SIZE = 5, 72                       # geometry_msgs/Twist（自機の速度）
+VEL_X_OFF, VEL_Y_OFF, VEL_Z_OFF = 24, 32, 40   # ★ pose と同じ並び（linear x,y,z）
 
 # Radar returns in the sensor's ROS frame: x forward, y LEFT, z up.
 # So azimuth = atan2(y, x) is POSITIVE when the target is on our LEFT.
@@ -437,7 +439,7 @@ def _read_channel(robot, channel, size):
 
 
 def _hits(raw, az_half, el_half, r_max, min_abs_doppler, mount_yaw_deg=0.0,
-          own_speed_mps=None, moving_tol_mps=1.5):
+          own_speed_mps=None, moving_tol_mps=1.5, own_vel_sensor=None):
     """Returns inside an angular window, as (range, doppler, az, el).
 
     The window is expressed in ANGLES (not a box around the boresight) so it can
@@ -463,8 +465,13 @@ def _hits(raw, az_half, el_half, r_max, min_abs_doppler, mount_yaw_deg=0.0,
           |doppler - dop_static| < moving_tol_mps  → 静止物として捨てる
 
       ★★★ 同じ穴を**地面**で既に踏んでいる。**絶対値の門は自機が動いた瞬間に意味を失う。**
-      ★★ ここでは自機が**機首方向へ真っ直ぐ**進んでいると仮定している（横滑りは見ない）。
-        取り付けヨーのある副センサでは近似が落ちるので、その場合は C++ 側で判断すること。
+      ★★★★ 2026-09-07: `own_vel_sensor`（センサ座標の**速度ベクトル**）を渡すのが**正**で、
+        C++ と 1 行ずつ同じになる。`own_speed_mps` は「機首方向へ真っ直ぐ進む」という
+        近似で、旋回・横滑り・上下運動で崩れる —— **速度 PDU が無い環境のための保険**。
+      ★★★★ 許容 `moving_tol_mps` は**接近率より小さく**なければならない。追い越される機
+        （接近率 1.13 m/s）は許容 1.5 では捨てられる（co-moving target）。
+        ★★★ 「許容を広げれば静止物が消える」は**逆に相手機を消す** —— 広げずに済ませる
+          には**自機速度の精度**を上げるしかない（だから位置差分をやめて ch5 を読む）。
 
     `az_half`/`el_half` of None means "do not narrow what the radar reports".
     That matters once a window stops being symmetric (#7): a scenario asking for
@@ -493,10 +500,20 @@ def _hits(raw, az_half, el_half, r_max, min_abs_doppler, mount_yaw_deg=0.0,
         el = math.degrees(math.atan2(z, math.hypot(x, y)))
         # ★★★★ 自機の速度を渡されたら、**静止物なら出るはずの値との差**で切る。
         #   ★ 方位は取り付けヨーを折り込む**前**のもの（＝ センサ座標）を使う。
-        if own_speed_mps is not None:
-            _az0 = math.degrees(math.atan2(y, x))
-            dop_static = -own_speed_mps * math.cos(math.radians(_az0)) \
-                * math.cos(math.radians(el))
+        if own_vel_sensor is not None or own_speed_mps is not None:
+            if own_vel_sensor is not None:
+                # ★★★★ 正の形（C++ `world/radar_tracker.hpp:108` と同一）:
+                #   **速度ベクトルを視線の単位ベクトルに内積する。**
+                #   ★ 近似（speed·cos az·cos el）と違い、旋回中・横滑り・上下運動でも合う。
+                _inv = 1.0 / r
+                dop_static = -(own_vel_sensor[0] * x * _inv
+                               + own_vel_sensor[1] * y * _inv
+                               + own_vel_sensor[2] * z * _inv)
+            else:
+                # ★ 旧来の近似（速度 PDU が無い環境のための保険）。
+                _az0 = math.degrees(math.atan2(y, x))
+                dop_static = -own_speed_mps * math.cos(math.radians(_az0)) \
+                    * math.cos(math.radians(el))
             if abs(v - dop_static) < moving_tol_mps:
                 continue    # ★ 静止物（地面・塔・壁）
         if (az_half is None or abs(az) <= az_half) and \
@@ -506,7 +523,8 @@ def _hits(raw, az_half, el_half, r_max, min_abs_doppler, mount_yaw_deg=0.0,
 
 
 def scan(robot, az_half=15.0, el_half=15.0, r_max=None, min_abs_doppler=None,
-         channel=RADAR_CH, own_speed_mps=None, moving_tol_mps=1.5):
+         channel=RADAR_CH, own_speed_mps=None, moving_tol_mps=1.5,
+         own_vel_sensor=None):
     """Nearest return from ONE radar channel, with its bearing.
 
     Returns EMPTY_SCAN when nothing qualifies. `doppler` is negative while the
@@ -518,7 +536,8 @@ def scan(robot, az_half=15.0, el_half=15.0, r_max=None, min_abs_doppler=None,
     if raw is None:
         return EMPTY_SCAN
     hits = _hits(raw, az_half, el_half, r_max, min_abs_doppler,
-                 own_speed_mps=own_speed_mps, moving_tol_mps=moving_tol_mps)
+                 own_speed_mps=own_speed_mps, moving_tol_mps=moving_tol_mps,
+                 own_vel_sensor=own_vel_sensor)
     if not hits:
         return EMPTY_SCAN
     hits.sort()
@@ -527,7 +546,8 @@ def scan(robot, az_half=15.0, el_half=15.0, r_max=None, min_abs_doppler=None,
 
 
 def scan_units(robot, units=None, az_half=15.0, el_half=15.0, r_max=None,
-               min_abs_doppler=None, own_speed_mps=None, moving_tol_mps=1.5):
+               min_abs_doppler=None, own_speed_mps=None, moving_tol_mps=1.5,
+               own_vel_sensor=None):
     """What each radar of the fit sees, keyed by sensor id.
 
     The per-sensor breakdown is what lets a scenario say WHICH radar found the
@@ -542,7 +562,8 @@ def scan_units(robot, units=None, az_half=15.0, el_half=15.0, r_max=None,
             continue
         hits = _hits(raw, az_half, el_half, r_max, min_abs_doppler,
                      u.mount_yaw_deg,
-                     own_speed_mps=own_speed_mps, moving_tol_mps=moving_tol_mps)
+                     own_speed_mps=own_speed_mps, moving_tol_mps=moving_tol_mps,
+                     own_vel_sensor=own_vel_sensor)
         if not hits:
             out[u.sensor_id] = EMPTY_SCAN._replace(source=u.sensor_id)
             continue
@@ -691,6 +712,53 @@ def read_xyz(robot):
     return (struct.unpack_from("<d", b, POS_X_OFF)[0],
             struct.unpack_from("<d", b, POS_Y_OFF)[0],
             struct.unpack_from("<d", b, POS_Z_OFF)[0])
+
+
+def read_vel(robot):
+    """自機の速度 (vx, vy, vz) を **速度 PDU（ch5）から直接**読む。無ければ None。
+
+    ★★★★ 2026-09-07: **位置の差分で速度を作ってはいけない。**
+      差分は「2 点の間の平均」なので、指令の刻み（実寸は 2.5 s）で取ると
+      **加減速のあいだ 1 m/s 級で外す**。その誤差はそのまま
+      「静止物なら出るはずのドップラ」の誤差になり、門の許容を広げさせる ——
+      そして許容を広げると、こちらとほぼ同じ速さで動く相手（co-moving）が捨てられる。
+      ★★★ 実測: 塔を捨てるには許容 1.5 が要り、追い越される機（接近率 1.13 m/s）は
+        その許容に飲まれた。**両立しないのは門の設計ではなく、速度の精度のせい**だった。
+
+    ★★ 速度 PDU が無い pdudef（教育・ショー）では None を返す。呼ぶ側は
+      `own_vel_body()` 経由で位置差分へ落ちる。
+    """
+    raw = _read_channel(robot, VEL_CH, VEL_SIZE)
+    if not raw or len(raw) < VEL_SIZE:
+        return None
+    b = bytes(raw)
+    return (struct.unpack_from("<d", b, VEL_X_OFF)[0],
+            struct.unpack_from("<d", b, VEL_Y_OFF)[0],
+            struct.unpack_from("<d", b, VEL_Z_OFF)[0])
+
+
+def own_vel_body(robot, fallback_speed_mps=None):
+    """自機の速度を **センサ座標（前・左・上）** で返す。読めなければ None。
+
+    ★★★★ これが C++（正・`world/radar_tracker.hpp:108`）と同じ形である ——
+      あちらは `own_vel_sensor` の **3 成分**を視線ベクトルに内積する。
+      Python 側は長らく `speed * cos(az) * cos(el)` で近似していたが、それは
+      **「機体は機首方向へ真っ直ぐ進む」** という仮定であり、旋回中・横風の中では崩れる。
+
+    ★★ 変換: 姿勢 PDU は 箱庭（y が右・ヨーは右回りが正）、センサは FLU（y が左）。
+      vf = vx·cosψ + vy·sinψ ／ vl = vx·sinψ − vy·cosψ ／ vu = vz  （ψ は PDU のヨー）
+    ★ ロール・ピッチは折り込まない（水平飛行で数度）。必要になったら C++ と同じく
+      クォータニオンから回すこと。
+    """
+    v = read_vel(robot)
+    yaw = read_yaw_deg(robot)
+    if v is None or yaw is None:
+        if fallback_speed_mps is None:
+            return None
+        return (float(fallback_speed_mps), 0.0, 0.0)   # ★ 機首方向とみなす（旧来の近似）
+    c = math.cos(math.radians(yaw))
+    sn = math.sin(math.radians(yaw))
+    return (v[0] * c + v[1] * sn, v[0] * sn - v[1] * c, v[2])
 
 
 def read_yaw_deg(robot):
