@@ -436,7 +436,8 @@ def _read_channel(robot, channel, size):
     return raw or None
 
 
-def _hits(raw, az_half, el_half, r_max, min_abs_doppler, mount_yaw_deg=0.0):
+def _hits(raw, az_half, el_half, r_max, min_abs_doppler, mount_yaw_deg=0.0,
+          own_speed_mps=None, moving_tol_mps=1.5):
     """Returns inside an angular window, as (range, doppler, az, el).
 
     The window is expressed in ANGLES (not a box around the boresight) so it can
@@ -451,6 +452,19 @@ def _hits(raw, az_half, el_half, r_max, min_abs_doppler, mount_yaw_deg=0.0):
     an aircraft findable inside wall clutter (S-7). The JRC sea trials describe
     exactly this problem: the received signal carries reflections from waves,
     terrain and buildings alongside the threat.
+
+    ★★★★ **その絶対値の門は、自機が止まっているときしか効かない**（2026-09-06）。
+      自機が 8 m/s で前進していれば **正面の静止物も −8 m/s に見える**ので素通りする
+      （実測: 実寸の S-7 で塔を掴み、相手機との距離が 147.63 m ずれた）。
+      ★★★★ `own_speed_mps` を渡すと、C++（正・`world/radar_tracker.hpp`）と同じく
+      **「静止物なら出るはずのドップラとの差」**で切る:
+
+          dop_static = -own_speed * cos(az) * cos(el)
+          |doppler - dop_static| < moving_tol_mps  → 静止物として捨てる
+
+      ★★★ 同じ穴を**地面**で既に踏んでいる。**絶対値の門は自機が動いた瞬間に意味を失う。**
+      ★★ ここでは自機が**機首方向へ真っ直ぐ**進んでいると仮定している（横滑りは見ない）。
+        取り付けヨーのある副センサでは近似が落ちるので、その場合は C++ 側で判断すること。
 
     `az_half`/`el_half` of None means "do not narrow what the radar reports".
     That matters once a window stops being symmetric (#7): a scenario asking for
@@ -469,7 +483,7 @@ def _hits(raw, az_half, el_half, r_max, min_abs_doppler, mount_yaw_deg=0.0):
         if r < 0.05 or (r_max is not None and r > r_max):
             continue
         if min_abs_doppler is not None and abs(v) < min_abs_doppler:
-            continue    # static clutter
+            continue    # static clutter（★ 自機が止まっているときだけ効く門）
         az = math.degrees(math.atan2(y, x))
         if mount_yaw_deg:
             # Fold to (-180,180] so a rear mount does not push bearings out of
@@ -477,6 +491,14 @@ def _hits(raw, az_half, el_half, r_max, min_abs_doppler, mount_yaw_deg=0.0):
             # cannot perturb a number any existing scenario reads.
             az = (az + mount_yaw_deg + 180.0) % 360.0 - 180.0
         el = math.degrees(math.atan2(z, math.hypot(x, y)))
+        # ★★★★ 自機の速度を渡されたら、**静止物なら出るはずの値との差**で切る。
+        #   ★ 方位は取り付けヨーを折り込む**前**のもの（＝ センサ座標）を使う。
+        if own_speed_mps is not None:
+            _az0 = math.degrees(math.atan2(y, x))
+            dop_static = -own_speed_mps * math.cos(math.radians(_az0)) \
+                * math.cos(math.radians(el))
+            if abs(v - dop_static) < moving_tol_mps:
+                continue    # ★ 静止物（地面・塔・壁）
         if (az_half is None or abs(az) <= az_half) and \
            (el_half is None or abs(el) <= el_half):
             out.append((r, v, az, el))
@@ -484,7 +506,7 @@ def _hits(raw, az_half, el_half, r_max, min_abs_doppler, mount_yaw_deg=0.0):
 
 
 def scan(robot, az_half=15.0, el_half=15.0, r_max=None, min_abs_doppler=None,
-         channel=RADAR_CH):
+         channel=RADAR_CH, own_speed_mps=None, moving_tol_mps=1.5):
     """Nearest return from ONE radar channel, with its bearing.
 
     Returns EMPTY_SCAN when nothing qualifies. `doppler` is negative while the
@@ -495,7 +517,8 @@ def scan(robot, az_half=15.0, el_half=15.0, r_max=None, min_abs_doppler=None,
     raw = _read_channel(robot, channel, RADAR_SIZE)
     if raw is None:
         return EMPTY_SCAN
-    hits = _hits(raw, az_half, el_half, r_max, min_abs_doppler)
+    hits = _hits(raw, az_half, el_half, r_max, min_abs_doppler,
+                 own_speed_mps=own_speed_mps, moving_tol_mps=moving_tol_mps)
     if not hits:
         return EMPTY_SCAN
     hits.sort()
@@ -504,7 +527,7 @@ def scan(robot, az_half=15.0, el_half=15.0, r_max=None, min_abs_doppler=None,
 
 
 def scan_units(robot, units=None, az_half=15.0, el_half=15.0, r_max=None,
-               min_abs_doppler=None):
+               min_abs_doppler=None, own_speed_mps=None, moving_tol_mps=1.5):
     """What each radar of the fit sees, keyed by sensor id.
 
     The per-sensor breakdown is what lets a scenario say WHICH radar found the
@@ -518,7 +541,8 @@ def scan_units(robot, units=None, az_half=15.0, el_half=15.0, r_max=None,
             out[u.sensor_id] = EMPTY_SCAN
             continue
         hits = _hits(raw, az_half, el_half, r_max, min_abs_doppler,
-                     u.mount_yaw_deg)
+                     u.mount_yaw_deg,
+                     own_speed_mps=own_speed_mps, moving_tol_mps=moving_tol_mps)
         if not hits:
             out[u.sensor_id] = EMPTY_SCAN._replace(source=u.sensor_id)
             continue
