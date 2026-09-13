@@ -716,6 +716,7 @@ def read_xyz(robot):
 
 def read_vel(robot):
     """自機の速度 (vx, vy, vz) を **速度 PDU（ch5）から直接**読む。無ければ None。
+    ★★★★ **機体座標（前・左・上）**である（2026-09-13〜・drone-pro の velocity_body）。世界の速度ではない。
 
     ★★★★ 2026-09-07: **位置の差分で速度を作ってはいけない。**
       差分は「2 点の間の平均」なので、指令の刻み（実寸は 2.5 s）で取ると
@@ -745,20 +746,18 @@ def own_vel_body(robot, fallback_speed_mps=None):
       Python 側は長らく `speed * cos(az) * cos(el)` で近似していたが、それは
       **「機体は機首方向へ真っ直ぐ進む」** という仮定であり、旋回中・横風の中では崩れる。
 
-    ★★ 変換: 姿勢 PDU は 箱庭（y が右・ヨーは右回りが正）、センサは FLU（y が左）。
-      vf = vx·cosψ + vy·sinψ ／ vl = vx·sinψ − vy·cosψ ／ vu = vz  （ψ は PDU のヨー）
-    ★ ロール・ピッチは折り込まない（水平飛行で数度）。必要になったら C++ と同じく
-      クォータニオンから回すこと。
+    ★★★★ 2026-09-13: **速度 PDU（ch5）は機体座標（前・左・上）そのもの**になった
+      （drone-pro の `velocity_body` と同じ。箱庭 PDU は ROS）。**回さずにそのまま返す**。
+      ★ 以前は ch5 が世界座標で、しかも姿勢 PDU を「y が右・ヨーは右回り」と
+        誤解した上で回していた（`devai/hakoniwa_pdu_frame_review_20260913.md`）。
+    ★ センサは機首向きに固定（取付ヨー 0）なので、機体座標 ＝ センサ座標。
     """
     v = read_vel(robot)
-    yaw = read_yaw_deg(robot)
-    if v is None or yaw is None:
+    if v is None:
         if fallback_speed_mps is None:
             return None
         return (float(fallback_speed_mps), 0.0, 0.0)   # ★ 機首方向とみなす（旧来の近似）
-    c = math.cos(math.radians(yaw))
-    sn = math.sin(math.radians(yaw))
-    return (v[0] * c + v[1] * sn, v[0] * sn - v[1] * c, v[2])
+    return (v[0], v[1], v[2])
 
 
 def read_yaw_deg(robot):
