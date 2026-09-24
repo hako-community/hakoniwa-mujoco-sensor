@@ -2,6 +2,8 @@
 
 #include <memory>
 #include <random>
+#include <cstdint>
+#include <string>
 #include <vector>
 
 namespace hako {
@@ -51,6 +53,9 @@ public:
     virtual double Apply(double value, const NoiseParams& params) = 0;
     virtual double ApplyRangeRule(double value, const RangeNoiseRule& rule) = 0;
     virtual void Reset() = 0;
+    // Default keeps compatibility with stateless models.  Stateful models
+    // override this to make episode replay deterministic.
+    virtual void Reseed(std::uint32_t) {}
 };
 
 class GaussianNoiseModel : public INoiseModel {
@@ -60,6 +65,7 @@ public:
     double Apply(double value, const NoiseParams& params) override;
     double ApplyRangeRule(double value, const RangeNoiseRule& rule) override;
     void Reset() override;
+    void Reseed(std::uint32_t seed) override;
 
 private:
     double dt_;
@@ -104,7 +110,9 @@ struct AxisValue {
 
 class AxisNoisePipeline {
 public:
-    explicit AxisNoisePipeline(const AxisNoiseParams& params, double dt_sec = 0.001);
+    explicit AxisNoisePipeline(const AxisNoiseParams& params, double dt_sec = 0.001,
+                               std::uint64_t experiment_seed = 0,
+                               std::string sensor_id = "axis_noise");
 
     AxisValue Apply(const AxisValue& value) const;
     void Reset();

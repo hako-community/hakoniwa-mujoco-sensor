@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hakoniwa.dev/schemas/sensor-contract.schema.json",
+  "title": "Hakoniwa sensor observation contract (Phase S0)",
+  "description": "Versioned configuration vocabulary. It is additive to existing sensor manifests; S1 is responsible for runtime enforcement.",
+  "type": "object",
+  "required": ["contract_version", "sensor_id", "profile", "calibration", "timing", "seed"],
+  "properties": {
+    "contract_version": { "const": "s0" },
+    "sensor_id": { "type": "string", "minLength": 1 },
+    "profile": { "$ref": "#/$defs/profile" },
+    "calibration": { "$ref": "#/$defs/calibration" },
+    "timing": { "$ref": "#/$defs/timing" },
+    "seed": { "$ref": "#/$defs/seed" },
+    "capabilities": { "$ref": "#/$defs/capabilities" }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "profile": {
+      "type": "object",
+      "required": ["id", "kind", "provenance"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["truth", "ideal", "datasheet", "fitted", "randomized", "fault"] },
+        "provenance": { "enum": ["assumed", "datasheet", "measured", "fitted"] },
+        "basis": { "type": "string" },
+        "version": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "calibration": {
+      "type": "object",
+      "required": ["id", "provenance"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "provenance": { "enum": ["none", "assumed", "datasheet", "measured", "fitted"] },
+        "valid_until": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": true
+    },
+    "timing": {
+      "type": "object",
+      "required": ["clock", "rate_hz", "reset_mode"],
+      "properties": {
+        "clock": { "const": "simulation_time" },
+        "rate_hz": { "type": "number", "exclusiveMinimum": 0 },
+        "phase_sec": { "type": "number", "minimum": 0 },
+        "reset_mode": { "enum": ["episode_replay", "runtime_continue"] },
+        "latency": {
+          "type": "object",
+          "properties": {
+            "mean_ns": { "type": "integer", "minimum": 0 },
+            "stddev_ns": { "type": "integer", "minimum": 0 },
+            "min_ns": { "type": "integer", "minimum": 0 },
+            "max_ns": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "dropout": {
+          "type": "object",
+          "properties": {
+            "model": { "enum": ["none", "bernoulli", "gilbert_elliott"] },
+            "probability": { "type": "number", "minimum": 0, "maximum": 1 },
+            "good_to_bad": { "type": "number", "minimum": 0, "maximum": 1 },
+            "bad_to_good": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "queue_depth": { "type": "integer", "minimum": 0 },
+        "overflow_policy": { "enum": ["drop_oldest", "drop_newest"] },
+        "stale_after_ns": { "type": "integer", "minimum": 0 },
+        "faults": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["start_ns", "end_ns", "action"],
+            "properties": {
+              "start_ns": { "type": "integer", "minimum": 0 },
+              "end_ns": { "type": "integer", "minimum": 0 },
+              "action": { "enum": ["drop", "invalidate"] }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "seed": {
+      "type": "object",
+      "required": ["experiment_seed", "stream_id"],
+      "properties": {
+        "experiment_seed": { "type": "integer", "minimum": 0 },
+        "stream_id": { "type": "string", "minLength": 1 },
+        "episode_id": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "multi_return": { "type": "boolean" },
+        "per_point_time": { "type": "boolean" },
+        "material_response": { "type": "boolean" },
+        "doppler": { "type": "boolean" },
+        "depth_invalid": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

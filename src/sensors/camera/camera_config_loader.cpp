@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include "config/json_config_utils.hpp"
 #include "common/json_utils.hpp"
@@ -127,6 +128,22 @@ void LoadNoiseConfigIfPresent(const json& root, CameraNoiseConfig& out)
     if (noise.contains("stddev") && noise.at("stddev").is_number()) {
         out.stddev = noise.at("stddev").get<double>();
     }
+    if (noise.contains("seed") && noise.at("seed").is_number_unsigned()) {
+        out.seed = noise.at("seed").get<std::uint32_t>();
+    }
+}
+
+void LoadIntrinsicsIfPresent(const json& root, CameraIntrinsics& out)
+{
+    if (!root.contains("intrinsics") || !root.at("intrinsics").is_object()) return;
+    const auto& intrinsics = root.at("intrinsics");
+    if (intrinsics.contains("fx") && intrinsics.at("fx").is_number()) out.fx = intrinsics.at("fx").get<double>();
+    if (intrinsics.contains("fy") && intrinsics.at("fy").is_number()) out.fy = intrinsics.at("fy").get<double>();
+    if (intrinsics.contains("cx") && intrinsics.at("cx").is_number()) out.cx = intrinsics.at("cx").get<double>();
+    if (intrinsics.contains("cy") && intrinsics.at("cy").is_number()) out.cy = intrinsics.at("cy").get<double>();
+    if (intrinsics.contains("distortion") && intrinsics.at("distortion").is_array()) {
+        out.distortion = intrinsics.at("distortion").get<std::vector<double>>();
+    }
 }
 
 bool ParseCameraConfigJson(const json& root, const std::string& path, CameraConfig& out)
@@ -180,6 +197,7 @@ bool ParseCameraConfigJson(const json& root, const std::string& path, CameraConf
     }
 
     LoadNoiseConfigIfPresent(*spec, config.noise);
+    LoadIntrinsicsIfPresent(*spec, config.intrinsics);
     out = config;
     return true;
 }
@@ -249,6 +267,7 @@ bool ParseDepthCameraConfigJson(const json& root, const std::string& path, Depth
     }
 
     LoadNoiseConfigIfPresent(root, config.noise);
+    LoadIntrinsicsIfPresent(root, config.intrinsics);
     out = config;
     return true;
 }
@@ -311,6 +330,13 @@ bool LoadRgbdCameraConfigFromJson(const std::string& path, RgbdCameraConfig& out
     }
     if (!ParseDepthCameraConfigJson(depth, path + ":depth", config.depth)) {
         return false;
+    }
+    if (root.contains("depth_artifact") && root.at("depth_artifact").is_object()) {
+        const auto& artifact = root.at("depth_artifact");
+        config.depth_artifact.enabled = artifact.value("enabled", false);
+        config.depth_artifact.material_ids = artifact.value("material_ids", std::vector<int> {});
+        config.depth_artifact.invalid_probability = artifact.value("invalid_probability", 0.0);
+        config.depth_artifact.seed = artifact.value("seed", 0U);
     }
 
     out = config;

@@ -19,6 +19,12 @@ GaussianNoiseModel::GaussianNoiseModel(double dt_sec)
 {
 }
 
+void GaussianNoiseModel::Reseed(std::uint32_t seed)
+{
+    rng_.seed(seed);
+    Reset();
+}
+
 double RangeNoisePipeline::Apply(double value) const
 {
     for (const auto& rule : rules_) {

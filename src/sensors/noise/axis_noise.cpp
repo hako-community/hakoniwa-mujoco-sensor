@@ -1,4 +1,5 @@
 #include "sensors/noise/noise.hpp"
+#include "sensors/common/seed_manager.hpp"
 #include <cmath>
 #include <stdexcept>
 
@@ -61,12 +62,19 @@ namespace noise {
         return std::round(value / precision) * precision;
     }
 
-    AxisNoisePipeline::AxisNoisePipeline(const AxisNoiseParams& params, double dt_sec)
+    AxisNoisePipeline::AxisNoisePipeline(const AxisNoiseParams& params, double dt_sec,
+                                         std::uint64_t experiment_seed, std::string sensor_id)
         : params_(params)
         , model_x_(CreateNoiseModel(params.x.type, dt_sec))
         , model_y_(CreateNoiseModel(params.y.type, dt_sec))
         , model_z_(CreateNoiseModel(params.z.type, dt_sec))
     {
+        // Each axis has an explicit, domain-separated stream.  The old three
+        // default-constructed mt19937 instances generated identical sequences.
+        const common::SeedManager seed_manager(experiment_seed);
+        model_x_->Reseed(seed_manager.Derive32(sensor_id, "measurement", "x"));
+        model_y_->Reseed(seed_manager.Derive32(sensor_id, "measurement", "y"));
+        model_z_->Reseed(seed_manager.Derive32(sensor_id, "measurement", "z"));
     }
 
     AxisValue AxisNoisePipeline::Apply(const AxisValue& value) const

@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "sensors/camera/camera_encoding_utils.hpp"
+#include "sensors/camera/camera_noise.hpp"
 #include "sensors/camera/mujoco_camera_renderer.hpp"
 
 #ifndef M_PI
@@ -42,6 +43,10 @@ bool ValidateStereoSideConfig(const CameraConfig& config, const char* side_name)
         config.image.format != "L8")
     {
         std::cerr << "Invalid " << side_name << " stereo image format: " << config.image.format << std::endl;
+        return false;
+    }
+    if ((config.noise.type != "none" && config.noise.type != "gaussian") || config.noise.stddev < 0.0) {
+        std::cerr << "Invalid " << side_name << " stereo noise configuration" << std::endl;
         return false;
     }
     return true;
@@ -108,6 +113,8 @@ bool StereoCameraSensor::LoadConfig(const StereoCameraConfig& config)
     }
 
     config_ = config;
+    left_noise_rng_.seed(config_.left.noise.seed);
+    right_noise_rng_.seed(config_.right.noise.seed);
     StartScheduler(config_.left.update_rate);
     return true;
 }
@@ -157,6 +164,13 @@ void StereoCameraSensor::Capture(ImageFrame& left_out, ImageFrame& right_out)
         if (!right_encoded) {
             std::cerr << "Failed to encode right stereo frame" << std::endl;
         }
+        ClearImageFrame(left_out);
+        ClearImageFrame(right_out);
+        return;
+    }
+    if (!ApplyImageNoise(left_out, config_.left.noise, left_noise_rng_) ||
+        !ApplyImageNoise(right_out, config_.right.noise, right_noise_rng_))
+    {
         ClearImageFrame(left_out);
         ClearImageFrame(right_out);
         return;

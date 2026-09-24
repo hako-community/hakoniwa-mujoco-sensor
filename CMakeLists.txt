@@ -40,11 +40,18 @@ option(HAKO_SENSOR_BUILD_CAMERA "Build camera sensors (requires GLFW/OpenGL)" OF
 # MuJoCo headers are required to COMPILE the library (primitive_types.hpp and the
 # MuJoCo ray-caster backend include <mujoco/mujoco.h>). Linking libmujoco is the
 # responsibility of the final executable / integration layer, not this archive.
-set(MUJOCO_INCLUDE_DIR "" CACHE PATH "Directory containing mujoco/mujoco.h")
+set(MUJOCO_ROOT "$ENV{MUJOCO_ROOT}" CACHE PATH "MuJoCo root containing include/ and lib/ or bin/")
+set(MUJOCO_INCLUDE_DIR "$ENV{MUJOCO_INCLUDE_DIR}" CACHE PATH "Directory containing mujoco/mujoco.h")
 
 # Hakoniwa core install prefix (provides generated PDU type headers used by the
 # PDU converters/adapters). Defaults to the standard install location.
-set(HAKONIWA_INSTALL_PREFIX "/usr/local/hakoniwa" CACHE PATH "hakoniwa-core install prefix")
+set(HAKONIWA_INSTALL_PREFIX "" CACHE PATH "hakoniwa-core install prefix")
+if(NOT HAKONIWA_INSTALL_PREFIX AND DEFINED ENV{HAKO_CORE_INC_PATH})
+    get_filename_component(HAKONIWA_INSTALL_PREFIX "$ENV{HAKO_CORE_INC_PATH}" DIRECTORY)
+endif()
+if(NOT HAKONIWA_INSTALL_PREFIX AND UNIX AND NOT APPLE)
+    set(HAKONIWA_INSTALL_PREFIX "/usr/local/hakoniwa")
+endif()
 
 # Vendored nlohmann/json (single header). Falls back to system package.
 set(NLOHMANN_JSON_INCLUDE_DIR "" CACHE PATH "Directory containing nlohmann/json.hpp")
@@ -60,6 +67,9 @@ set(NLOHMANN_JSON_INCLUDE_DIR "" CACHE PATH "Directory containing nlohmann/json.
 #      find_mujoco_root と同じ考え方）
 #   2) ヘッダしか無い場所（未ビルドのソースチェックアウト等。コンパイルは通るので
 #      ライブラリを要らない利用者のために残すが、優先はしない）
+if(NOT MUJOCO_INCLUDE_DIR AND MUJOCO_ROOT)
+    set(MUJOCO_INCLUDE_DIR "${MUJOCO_ROOT}/include")
+endif()
 if(NOT MUJOCO_INCLUDE_DIR)
     foreach(_root
         # ★★★★ 2026-09-02: **このリポジトリが自分で持つものを最優先**（setup.sh が置く）。
@@ -69,7 +79,7 @@ if(NOT MUJOCO_INCLUDE_DIR)
         "${CMAKE_CURRENT_SOURCE_DIR}/external_library/mujoco"
         "/usr/local"
         "/opt/mujoco")
-        if(EXISTS "${_root}/include/mujoco/mujoco.h" AND EXISTS "${_root}/lib/libmujoco.so")
+        if(EXISTS "${_root}/include/mujoco/mujoco.h")
             # lib は下の「ヘッダの隣を見る」ロジックが同じ root から拾う。
             set(MUJOCO_INCLUDE_DIR "${_root}/include")
             break()
@@ -81,8 +91,7 @@ if(NOT MUJOCO_INCLUDE_DIR)
     #   ★★★ **そこは 3.10.0-dev のソースチェックアウトで、記録に残っている事故
     #     （3.10.0-dev ヘッダ ＋ 3.9.0 ライブラリ → 実行時 SEGV）の当事者そのもの**である。
     #     「ライブラリが要らない利用者のために残す」より、踏む危険のほうが大きい。
-    foreach(_cand
-        "/usr/local/include")
+    foreach(_cand "/usr/local/include")
         if(EXISTS "${_cand}/mujoco/mujoco.h")
             set(MUJOCO_INCLUDE_DIR "${_cand}")
             break()
@@ -132,6 +141,7 @@ if(HAKO_SENSOR_BUILD_CAMERA)
     set(_camera_srcs
         src/sensors/camera/camera_config_loader.cpp
         src/sensors/camera/camera_encoding_utils.cpp
+        src/sensors/camera/camera_noise.cpp
         src/sensors/camera/camera_sensor.cpp
         src/sensors/camera/depth_camera_sensor.cpp
         src/sensors/camera/rgbd_camera_sensor.cpp
@@ -203,6 +213,21 @@ endif()
 # ---------------------------------------------------------------------------
 if(HAKO_SENSOR_BUILD_TESTS)
     enable_testing()
+    # Phase S0: the transport-neutral envelope/status contract must remain
+    # usable by every sensor without MuJoCo, PDU, or JSON dependencies.
+    add_executable(sensor_contract_test tests/sensor_contract_test.cpp)
+    target_compile_features(sensor_contract_test PRIVATE cxx_std_20)
+    target_include_directories(sensor_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_test(NAME sensor_contract_test COMMAND sensor_contract_test)
+
+    add_executable(sensor_pipeline_test
+        tests/sensor_pipeline_test.cpp
+        src/sensors/noise/range_noise.cpp
+        src/sensors/noise/axis_noise.cpp)
+    target_compile_features(sensor_pipeline_test PRIVATE cxx_std_20)
+    target_include_directories(sensor_pipeline_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_test(NAME sensor_pipeline_test COMMAND sensor_pipeline_test)
+
     add_executable(radar_math_test
         tests/radar_math_test.cpp
         src/sensors/radar/radar_sensor.cpp
@@ -295,14 +320,20 @@ if(HAKO_SENSOR_BUILD_TESTS)
 
     # Real-physics integration test: requires a linkable libmujoco.
     # Auto-detect alongside the headers; override with -DMUJOCO_LIB_DIR=...
-    set(MUJOCO_LIB_DIR "" CACHE PATH "Directory containing libmujoco.so (enables the MuJoCo integration test)")
+    set(MUJOCO_LIB_DIR "$ENV{MUJOCO_LIB_DIR}" CACHE PATH "Directory containing the MuJoCo library (enables the MuJoCo integration test)")
     if(NOT MUJOCO_LIB_DIR AND MUJOCO_INCLUDE_DIR)
         get_filename_component(_mj_root "${MUJOCO_INCLUDE_DIR}" DIRECTORY)
-        if(EXISTS "${_mj_root}/lib/libmujoco.so")
+        if(EXISTS "${_mj_root}/lib" OR EXISTS "${_mj_root}/bin")
             set(MUJOCO_LIB_DIR "${_mj_root}/lib")
+            if(NOT EXISTS "${MUJOCO_LIB_DIR}")
+                set(MUJOCO_LIB_DIR "${_mj_root}/bin")
+            endif()
         endif()
     endif()
-    find_library(MUJOCO_LIBRARY NAMES mujoco PATHS "${MUJOCO_LIB_DIR}")
+    set(MUJOCO_LIBRARY "$ENV{MUJOCO_LIBRARY}" CACHE FILEPATH "MuJoCo import/shared library")
+    if(NOT MUJOCO_LIBRARY)
+        find_library(MUJOCO_LIBRARY NAMES mujoco PATHS "${MUJOCO_LIB_DIR}" NO_DEFAULT_PATH)
+    endif()
 
     # ヘッダとライブラリの版が一致しているか検査する。
     # 不一致でも**コンパイルもリンクも通ってしまい**、実行時に mjModel/mjData の

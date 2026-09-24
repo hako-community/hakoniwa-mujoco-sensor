@@ -200,6 +200,38 @@ bool MujocoCameraRenderer::Render(
         &con_
     );
 
+    // A second ID-color pass provides the visible MuJoCo material per pixel.
+    // This is a geometric/material identity approximation, not an optical
+    // structured-light or time-of-flight material response model.
+    if (need_depth) {
+        const mjtByte original_segment = scn_.flags[mjRND_SEGMENT];
+        const mjtByte original_idcolor = scn_.flags[mjRND_IDCOLOR];
+        scn_.flags[mjRND_SEGMENT] = 1;
+        scn_.flags[mjRND_IDCOLOR] = 1;
+        mjr_render(viewport, &scn_, &con_);
+        std::vector<unsigned char> id_rgb(width * height * 3);
+        mjr_readPixels(id_rgb.data(), nullptr, viewport, &con_);
+        out.material_ids.assign(width * height, -1);
+        for (int y = 0; y < height; ++y) {
+            const int source_y = height - 1 - y;
+            for (int x = 0; x < width; ++x) {
+                const int source = (source_y * width + x) * 3;
+                const int scene_id = static_cast<int>(id_rgb[source])
+                    + (static_cast<int>(id_rgb[source + 1]) << 8)
+                    + (static_cast<int>(id_rgb[source + 2]) << 16) - 1;
+                if (scene_id >= 0 && scene_id < scn_.ngeom) {
+                    const auto& visual_geom = scn_.geoms[scene_id];
+                    if (visual_geom.objtype == mjOBJ_GEOM
+                        && visual_geom.objid >= 0 && visual_geom.objid < model->ngeom) {
+                        out.material_ids[y * width + x] = model->geom_matid[visual_geom.objid];
+                    }
+                }
+            }
+        }
+        scn_.flags[mjRND_SEGMENT] = original_segment;
+        scn_.flags[mjRND_IDCOLOR] = original_idcolor;
+    }
+
     if (need_rgb) {
         std::vector<uint8_t> flipped_rgb(out.rgb.size());
         int row_size = width * 3;

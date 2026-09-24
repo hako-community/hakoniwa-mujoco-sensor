@@ -16,6 +16,8 @@ namespace hako::robots::sensor::camera
         int height = 0;
         std::vector<uint8_t> rgb;
         std::vector<float> depth_buffer;
+        // MuJoCo material id for the visible geom at each pixel; -1 means none.
+        std::vector<int> material_ids;
         double timestamp = 0.0;
         double znear = 0.0;
         double zfar = 0.0;

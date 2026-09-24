@@ -41,10 +41,12 @@ IMU / odometry / tf / joint_state / 足裏接触 / 力覚 / RGBD カメラ / バ
 | `include/sensors/radar/` | **Radar: `radar_types` / `radar_math`（純粋） / `radar_sensor`** |
 | `include/sensors/{lidar,ultrasonic,imu,odometry,tf,joint_state}/` | 既存センサー（mujoco-robots から集約） |
 | `include/sensors/noise/`, `common/` | 共有ノイズ・スケジューラ |
+| `include/sensors/common/sensor_contract.hpp` | Phase S0 の時刻・status・profile・health sidecar 契約 |
 | `include/hakoniwa/pdu/{converter,adapter}/` | Frame ⇔ PDU（`RadarPointCloudPduAdapter` 追加） |
 | `src/sensors/...` | 上記の実装 |
 | `tests/radar_math_test.cpp` | Radar モデルの単体テスト（バックエンド非依存、MuJoCo/PDU 不要） |
 | `config/radar-sample.json` | Radar 設定サンプル |
+| `docs/physical_ai/` | Phase S0 契約・inventory と S1 共通 timing/seed/noise core |
 | **`capi/`** | **C-ABI 成果物**（`hako_sensor_capi.{h,cpp}` + smoke + build.bash）→ `libhako_mujoco_sensor_capi.so` |
 | **`examples/godot/`** | C-ABI を使う **Godot サンプル**（成果物ではない）。README 参照 |
 | **`drone_daasim/`** | **ドローン DAA（Detect And Avoid）シミュレーション一式**。本ライブラリの利用側デモ。下記参照 |

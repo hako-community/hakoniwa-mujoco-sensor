@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "sensors/camera/camera_encoding_utils.hpp"
+#include "sensors/camera/camera_noise.hpp"
 #include "sensors/camera/mujoco_camera_renderer.hpp"
 
 #ifndef M_PI
@@ -61,8 +62,13 @@ bool DepthCameraSensor::LoadConfig(const DepthCameraConfig& config)
         std::cerr << "Invalid depth camera image format: " << config.image.format << std::endl;
         return false;
     }
+    if ((config.noise.type != "none" && config.noise.type != "gaussian") || config.noise.stddev < 0.0) {
+        std::cerr << "Invalid depth camera noise configuration" << std::endl;
+        return false;
+    }
 
     config_ = config;
+    noise_rng_.seed(config_.noise.seed);
     StartScheduler(config_.update_rate);
     return true;
 }
@@ -91,12 +97,12 @@ void DepthCameraSensor::Capture(DepthFrame& out)
         return;
     }
 
-    // TODO: apply config_.noise after the validated depth path and the future
-    // serialization/noise contracts are finalized together.
     if (!EncodeDepth(raw, config_, out)) {
         std::cerr << "Failed to encode depth frame" << std::endl;
         ClearDepthFrame(out);
+        return;
     }
+    if (!ApplyDepthNoise(out, config_.noise, noise_rng_)) ClearDepthFrame(out);
 }
 
 }

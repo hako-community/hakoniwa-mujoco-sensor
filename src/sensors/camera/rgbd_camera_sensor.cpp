@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "sensors/camera/camera_encoding_utils.hpp"
+#include "sensors/camera/camera_noise.hpp"
 #include "sensors/camera/mujoco_camera_renderer.hpp"
 
 #ifndef M_PI
@@ -68,6 +69,10 @@ bool RgbdCameraSensor::LoadConfig(const RgbdCameraConfig& config)
         std::cerr << "Invalid RGB image format: " << config.rgb.image.format << std::endl;
         return false;
     }
+    if ((config.rgb.noise.type != "none" && config.rgb.noise.type != "gaussian") || config.rgb.noise.stddev < 0.0) {
+        std::cerr << "Invalid RGB camera noise configuration" << std::endl;
+        return false;
+    }
 
     if (config.depth.image.width <= 0 || config.depth.image.height <= 0) {
         std::cerr << "Invalid depth image size" << std::endl;
@@ -92,6 +97,15 @@ bool RgbdCameraSensor::LoadConfig(const RgbdCameraConfig& config)
         std::cerr << "Invalid depth image format: " << config.depth.image.format << std::endl;
         return false;
     }
+    if ((config.depth.noise.type != "none" && config.depth.noise.type != "gaussian") || config.depth.noise.stddev < 0.0) {
+        std::cerr << "Invalid depth camera noise configuration" << std::endl;
+        return false;
+    }
+    if (config.depth_artifact.invalid_probability < 0.0
+        || config.depth_artifact.invalid_probability > 1.0) {
+        std::cerr << "Invalid material depth artifact probability" << std::endl;
+        return false;
+    }
 
     if (config.rgb.image.width != config.depth.image.width ||
         config.rgb.image.height != config.depth.image.height)
@@ -108,6 +122,9 @@ bool RgbdCameraSensor::LoadConfig(const RgbdCameraConfig& config)
     }
 
     config_ = config;
+    rgb_noise_rng_.seed(config_.rgb.noise.seed);
+    depth_noise_rng_.seed(config_.depth.noise.seed);
+    depth_artifact_rng_.seed(config_.depth_artifact.seed);
     StartScheduler(config_.rgb.update_rate);
     return true;
 }
@@ -137,14 +154,30 @@ void RgbdCameraSensor::Capture(ImageFrame& rgb_out, DepthFrame& depth_out)
         return;
     }
 
-    // TODO: apply RGB/depth noise after both stream contracts are finalized.
     if (!EncodeImage(raw, config_.rgb, rgb_out)) {
         std::cerr << "Failed to encode RGB frame" << std::endl;
+        ClearImageFrame(rgb_out);
+    } else if (!ApplyImageNoise(rgb_out, config_.rgb.noise, rgb_noise_rng_)) {
         ClearImageFrame(rgb_out);
     }
     if (!EncodeDepth(raw, config_.depth, depth_out)) {
         std::cerr << "Failed to encode depth frame" << std::endl;
         ClearDepthFrame(depth_out);
+    } else if (!ApplyDepthNoise(depth_out, config_.depth.noise, depth_noise_rng_)) {
+        ClearDepthFrame(depth_out);
+    } else if (config_.depth_artifact.enabled) {
+        std::bernoulli_distribution invalidate(config_.depth_artifact.invalid_probability);
+        const auto targeted = [&](int material_id) {
+            return std::find(config_.depth_artifact.material_ids.begin(),
+                             config_.depth_artifact.material_ids.end(), material_id)
+                   != config_.depth_artifact.material_ids.end();
+        };
+        const auto count = std::min(depth_out.data.size(), raw.material_ids.size());
+        for (std::size_t i = 0; i < count; ++i) {
+            if (targeted(raw.material_ids[i]) && invalidate(depth_artifact_rng_)) {
+                depth_out.data[i] = 0.0F;
+            }
+        }
     }
 }
 

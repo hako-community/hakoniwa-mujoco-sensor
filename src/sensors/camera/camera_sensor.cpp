@@ -2,6 +2,7 @@
 #include "sensors/camera/camera_config_loader.hpp"
 #include "sensors/camera/mujoco_camera_renderer.hpp"
 #include "sensors/camera/camera_encoding_utils.hpp"
+#include "sensors/camera/camera_noise.hpp"
 #include <stdexcept>
 #include <iostream>
 #include <cmath>
@@ -65,8 +66,13 @@ bool CameraSensor::LoadConfig(const CameraConfig& config)
         std::cerr << "Invalid camera image format: " << config.image.format << std::endl;
         return false;
     }
+    if ((config.noise.type != "none" && config.noise.type != "gaussian") || config.noise.stddev < 0.0) {
+        std::cerr << "Invalid camera noise configuration" << std::endl;
+        return false;
+    }
 
     config_ = config;
+    noise_rng_.seed(config_.noise.seed);
     StartScheduler(config_.update_rate);
     return true;
 }
@@ -96,12 +102,12 @@ void CameraSensor::Capture(ImageFrame& out)
         return;
     }
 
-    // TODO: apply noise from config_.noise after the image noise contract is finalized.
-
     if (!EncodeImage(raw, config_, out)) {
         std::cerr << "Unsupported camera image format: " << config_.image.format << std::endl;
         ClearImageFrame(out);
+        return;
     }
+    if (!ApplyImageNoise(out, config_.noise, noise_rng_)) ClearImageFrame(out);
 }
 
 }
