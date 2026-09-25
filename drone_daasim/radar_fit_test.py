@@ -121,9 +121,9 @@ def main():
           "unknown robot -> empty map, not an exception")
 
     print("2) manifest parsing: what is fitted, and where it looks")
-    one = dc._manifest_radars(os.path.join(CFG_A2, "drone-a2-sensors.json"))
-    dual = dc._manifest_radars(os.path.join(CFG_A2, "drone-a2-sensors-dual.json"))
-    omni = dc._manifest_radars(os.path.join(CFG_A2, "drone-a2-sensors-360.json"))
+    one = dc._manifest_radars(os.path.join(CFG_A2, "drone-sensors.json"))
+    dual = dc._manifest_radars(os.path.join(CFG_A2, "drone-sensors-dual.json"))
+    omni = dc._manifest_radars(os.path.join(CFG_A2, "drone-sensors-360.json"))
     check(len(one) == 1 and close(one[0]["az_lo"], -30.0) and close(one[0]["az_hi"], 30.0),
           "baseline manifest: one radar, 60 deg sector -> az [-30,+30]")
     check(len(dual) == 2 and dual[1]["pdu_name"] == "radar_points_rear"
@@ -138,7 +138,7 @@ def main():
     check(len(fit) == 1 and fit[0].channel == 19 and fit[0].pdu_size == 177424,
           "no A2_PDUDEF/A2_MANIFEST -> the historical single ch19 radar (non-regression)")
 
-    use(pdudef=PDUDEF_2, manifest=os.path.join(CFG_A2, "drone-a2-sensors-dual.json"))
+    use(pdudef=PDUDEF_2, manifest=os.path.join(CFG_A2, "drone-sensors-dual.json"))
     fit = dc.radar_fit("Drone")
     check([u.channel for u in fit] == [19, 21],
           f"dual manifest + dual pdudef -> ch19 + ch21 (got {[u.channel for u in fit]})")
@@ -148,7 +148,7 @@ def main():
     # The case that must not go wrong: the aircraft is FITTED with a rear radar
     # but the master was started on a pdudef that has no channel for it. The
     # bridge refuses to publish it; the fit must refuse to read it.
-    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-a2-sensors-dual.json"))
+    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-sensors-dual.json"))
     fit = dc.radar_fit("Drone")
     check([u.channel for u in fit] == [19],
           "rear radar fitted but not wired in the pdudef -> dropped from the fit")
@@ -165,26 +165,26 @@ def main():
     with open(stack, "w") as f:
         _json.dump({"pdudef": PDUDEF_2,
                     "manifests": {
-                        "Drone": os.path.join(CFG_A2, "drone-a2-sensors-dual.json"),
-                        "Drone1": os.path.join(CFG_A2, "drone-a2-sensors.json")}}, f)
+                        "Drone": os.path.join(CFG_A2, "drone-sensors-dual.json"),
+                        "Drone1": os.path.join(CFG_A2, "drone-sensors.json")}}, f)
     use(stack=stack)
     check([u.channel for u in dc.radar_fit("Drone")] == [19, 21],
           "logs/stack.json alone resolves the fit -- no env needed across shells")
     check([u.channel for u in dc.radar_fit("Drone1")] == [19],
           "and each aircraft gets ITS own fit: Drone1 is forward-only here")
-    use(stack=stack, manifest=os.path.join(CFG_A2, "drone-a2-sensors.json"))
+    use(stack=stack, manifest=os.path.join(CFG_A2, "drone-sensors.json"))
     check([u.channel for u in dc.radar_fit("Drone")] == [19],
           "an explicit A2_MANIFEST still beats the recorded stack")
 
     print("4) coverage arithmetic")
-    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-a2-sensors.json"))
+    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-sensors.json"))
     check(close(dc.azimuth_coverage_deg("Drone"), 60.0),
           f"one 60 deg sector -> 60 deg covered (got {dc.azimuth_coverage_deg('Drone')})")
     check(dc.covers_az("Drone", 0.0) is True, "forward radar covers dead ahead")
     check(dc.covers_az("Drone", 180.0) is False,
           "forward radar does NOT cover astern -- the S-3 blind sector, now measured")
 
-    use(pdudef=PDUDEF_2, manifest=os.path.join(CFG_A2, "drone-a2-sensors-dual.json"))
+    use(pdudef=PDUDEF_2, manifest=os.path.join(CFG_A2, "drone-sensors-dual.json"))
     check(close(dc.azimuth_coverage_deg("Drone"), 120.0),
           f"forward + rear sectors -> 120 deg covered (got {dc.azimuth_coverage_deg('Drone')})")
     check(dc.covers_az("Drone", 180.0) is True,
@@ -192,7 +192,7 @@ def main():
     check(dc.covers_az("Drone", 90.0) is False,
           "the beam is still not covered by either sector")
 
-    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-a2-sensors-360.json"))
+    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-sensors-360.json"))
     check(close(dc.azimuth_coverage_deg("Drone"), 360.0),
           "360 manifest -> full coverage, overlap counted once")
 
@@ -210,7 +210,7 @@ def main():
           "and it is therefore excluded from a +/-15 deg forward window")
 
     print("6) merging across the fit")
-    use(pdudef=PDUDEF_2, manifest=os.path.join(CFG_A2, "drone-a2-sensors-dual.json"))
+    use(pdudef=PDUDEF_2, manifest=os.path.join(CFG_A2, "drone-sensors-dual.json"))
     _PAYLOADS.clear()
     # front radar: two returns, nearest at 3.0 m; rear radar: one at 1.5 m.
     _PAYLOADS[("Drone", 19)] = [(3.0, 0.0, 0.0, -0.5), (5.0, 0.0, 0.0, -0.5)]
@@ -234,7 +234,7 @@ def main():
           "a +/-15 deg forward window ignores the rear sector entirely")
 
     print("7) single-radar equivalence (the non-regression that matters)")
-    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-a2-sensors.json"))
+    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-sensors.json"))
     _PAYLOADS.clear()
     _PAYLOADS[("Drone", 19)] = [(2.0, 0.3, 0.0, -1.25), (4.0, 0.0, 0.0, -0.5)]
     a = dc.scan("Drone", az_half=30.0, el_half=15.0)
@@ -244,7 +244,7 @@ def main():
           "on a one-radar fit scan_best() == scan(): every scenario keeps its numbers")
 
     print("8) a missing channel is skipped, not fatal")
-    use(pdudef=PDUDEF_2, manifest=os.path.join(CFG_A2, "drone-a2-sensors-dual.json"))
+    use(pdudef=PDUDEF_2, manifest=os.path.join(CFG_A2, "drone-sensors-dual.json"))
     _PAYLOADS.clear()
     _PAYLOADS[("Drone", 19)] = [(2.0, 0.0, 0.0, -1.0)]      # ch21 absent -> raises
     s = dc.scan_best("Drone", az_half=180.0, el_half=15.0)
@@ -254,7 +254,7 @@ def main():
           "and remembered, so it is not retried every tick")
 
     print("9) elevation coverage (#7)")
-    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-a2-sensors.json"))
+    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-sensors.json"))
     check(close(dc.elevation_coverage_deg("Drone"), 20.0),
           f"baseline: symmetric 20 deg vertical FOV (got {dc.elevation_coverage_deg('Drone')})")
     check(dc.covers_el("Drone", 0.0) is True and dc.covers_el("Drone", -25.0) is False,
@@ -263,7 +263,7 @@ def main():
     check(close(u.el_lo, -10.0) and close(u.el_hi, 10.0),
           "vertical_fov_deg -> a window centred on the boresight")
 
-    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-a2-sensors-approach.json"))
+    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-sensors-approach.json"))
     u = dc.radar_fit("Drone")[0]
     check(close(u.el_lo, -35.0) and close(u.el_hi, 10.0),
           "approach manifest: explicit elevation_start/end wins, and is ASYMMETRIC")
@@ -274,8 +274,8 @@ def main():
     # The point rate must grow with the window or the radar gets less sensitive
     # (measured in radar_math_test); the manifest is the place that has to honour it.
     import json as _j
-    _base = _j.load(open(os.path.join(CFG_A2, "drone-a2-sensors.json")))
-    _app = _j.load(open(os.path.join(CFG_A2, "drone-a2-sensors-approach.json")))
+    _base = _j.load(open(os.path.join(CFG_A2, "drone-sensors.json")))
+    _app = _j.load(open(os.path.join(CFG_A2, "drone-sensors-approach.json")))
     def _radar_pps(doc):
         for c in doc["components"]:
             if c["type"] == "radar":
@@ -285,7 +285,7 @@ def main():
           f"points_per_second scaled by the 45/20 span ratio (got {ratio:.2f}x)")
 
     print("10) why a target was missed")
-    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-a2-sensors.json"))
+    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-sensors.json"))
     check(dc.coverage_gap("Drone", 0.0, 0.0, 5.0) is None,
           "dead ahead, in range -> no gap")
     g = dc.coverage_gap("Drone", 0.0, -25.0, 5.0)
@@ -301,12 +301,12 @@ def main():
     check(g is not None and "every window" in g,
           f"outside on both axes -> reported as such ({g})")
 
-    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-a2-sensors-approach.json"))
+    use(pdudef=PDUDEF_1, manifest=os.path.join(CFG_A2, "drone-sensors-approach.json"))
     check(dc.coverage_gap("Drone", 0.0, -25.0, 5.0) is None,
           "the approach fit closes exactly the gap that blocked S-5")
 
     use(pdudef=PDUDEF_1,
-        manifest=os.path.join(CFG_A2, "drone-a2-sensors-approach-wide.json"))
+        manifest=os.path.join(CFG_A2, "drone-sensors-approach-wide.json"))
     check(dc.coverage_gap("Drone", -50.0, -25.0, 5.0) is None,
           "the wide approach fit also covers 50 deg off the nose (#13)")
     # The trap #13 actually turned on: a scenario filtering harder than its own

@@ -5,10 +5,10 @@ Unlike the M6 external bridge (hakopy.init_for_external + pdu_write, whose write
 do NOT surface to PduManager readers), this registers as a real SYNC asset via
 hakopy.asset_register, so its Drone/lidar_points write is visible to other
 PduManager-based assets (Godot, hakosim getLidarData) -- exactly like drone-core's
-pos is visible to Godot. Sensor body stays in mujoco-sensor (lidar3d_a2_pdu does
+pos is visible to Godot. Sensor body stays in mujoco-sensor (lidar3d_pointcloud_pdu does
 the real C++ sensing over env.xml); this asset only orchestrates pos->sense->publish.
 
-Usage: python lidar_sensor_asset.py <pdu_config.json> <env.xml> <lidar3d_a2_pdu> [delta_msec=1] [sense_every=20]
+Usage: python lidar_sensor_asset.py <pdu_config.json> <env.xml> <lidar3d_pointcloud_pdu> [delta_msec=1] [sense_every=20]
 """
 import os, sys, tempfile, subprocess
 import hakopy
@@ -77,7 +77,7 @@ my_callback = {
 def main():
     global config_path, env_xml, demo, delta_time_usec, sense_every, _tmpd
     if len(sys.argv) < 4:
-        print(f"usage: {sys.argv[0]} <pdu_config.json> <env.xml> <lidar3d_a2_pdu> [delta_msec=1] [sense_every=20]")
+        print(f"usage: {sys.argv[0]} <pdu_config.json> <env.xml> <lidar3d_pointcloud_pdu> [delta_msec=1] [sense_every=20]")
         return 2
     config_path = sys.argv[1]
     env_xml = sys.argv[2]

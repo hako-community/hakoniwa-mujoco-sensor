@@ -62,7 +62,7 @@ set(NLOHMANN_JSON_INCLUDE_DIR "" CACHE PATH "Directory containing nlohmann/json.
 # MuJoCo の場所。ヘッダと libmujoco.so は**必ず同じ root から組で**選ぶこと。
 # 版が食い違うと構造体レイアウトがずれ、ビルドは通って実行時に SEGV する
 # （実際に 3.10.0-dev ヘッダ + 3.9.0 ライブラリで mujoco_radar_integration_test と
-#  lidar_a2_demo が落ちた）。そこで探索順は
+#  lidar_envsim_demo が落ちた）。そこで探索順は
 #   1) include と lib が揃っている root（＝リリース tarball。multi_build.bash の
 #      find_mujoco_root と同じ考え方）
 #   2) ヘッダしか無い場所（未ビルドのソースチェックアウト等。コンパイルは通るので
@@ -400,18 +400,18 @@ if(HAKO_SENSOR_BUILD_TESTS)
         add_test(NAME mujoco_radar_integration_test COMMAND mujoco_radar_integration_test)
 
         # M2 A-2 LiDAR demo: sense a simenv-data generated world (env.xml).
-        add_executable(lidar_a2_demo
-            examples/envsim_sensor_a2/lidar_a2_demo.cpp
+        add_executable(lidar_envsim_demo
+            examples/drone_envsim_sensors/lidar_envsim_demo.cpp
             src/sensors/backend/mujoco_ray_caster.cpp
             src/sensors/lidar/lidar_scan_sensor.cpp
         )
-        target_compile_features(lidar_a2_demo PRIVATE cxx_std_20)
-        target_include_directories(lidar_a2_demo PRIVATE
+        target_compile_features(lidar_envsim_demo PRIVATE cxx_std_20)
+        target_include_directories(lidar_envsim_demo PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${HAKO_MUJOCO_RUNTIME_DIR}/include)
-        target_include_directories(lidar_a2_demo SYSTEM PRIVATE ${MUJOCO_INCLUDE_DIR})
-        target_link_libraries(lidar_a2_demo PRIVATE ${MUJOCO_LIBRARY})
-        add_test(NAME lidar_a2_demo COMMAND lidar_a2_demo
+        target_include_directories(lidar_envsim_demo SYSTEM PRIVATE ${MUJOCO_INCLUDE_DIR})
+        target_link_libraries(lidar_envsim_demo PRIVATE ${MUJOCO_LIBRARY})
+        add_test(NAME lidar_envsim_demo COMMAND lidar_envsim_demo
             "${CMAKE_CURRENT_SOURCE_DIR}/../hakoniwa-simenv-data/examples/sensor_envs/simple_room/generated/env.xml")
 
         # Manifest-loader check: proves sensor_runtime.hpp actually reads the
@@ -419,7 +419,7 @@ if(HAKO_SENSOR_BUILD_TESTS)
         # mistyped key there would silently disable the falloff instead of failing.
         if(NLOHMANN_JSON_INCLUDE_DIR AND EXISTS "${HAKO_PDU_TYPES_INCLUDE_DIR}/builtin_interfaces")
             add_executable(check_radar_equation
-                examples/envsim_sensor_a2/check_radar_equation.cpp
+                examples/drone_envsim_sensors/check_radar_equation.cpp
                 src/sensors/radar/radar_sensor.cpp
                 src/sensors/lidar/lidar3d_sensor.cpp
                 src/sensors/lidar/lidar_scan_sensor.cpp

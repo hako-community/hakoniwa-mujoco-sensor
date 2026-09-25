@@ -192,7 +192,7 @@ def _manifest_path(robot):
     p = (_stack_descriptor().get("manifests") or {}).get(robot)
     if p and os.path.exists(p):
         return p
-    fallback = os.path.join(SENSOR_REPO, "config", "a2", "drone-a2-sensors.json")
+    fallback = os.path.join(SENSOR_REPO, "config", "a2", "drone-sensors.json")
     return fallback if os.path.exists(fallback) else None
 
 

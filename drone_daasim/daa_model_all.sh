@@ -27,7 +27,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/env.sh"
 # ★★★★ 縮尺は模型に固定する（呼ぶ側の環境に DAA_SCALE=full が残っていると実寸の値で走る）
 unset DAA_SCALE S2_SCALE S3_SCALE S4_SCALE S5_SCALE S6_SCALE S7_SCALE S8_SCALE
-CFG="$(cd "$HERE/.." && pwd)/config/a2"
+CFG="$(cd "$HERE/.." && pwd)/config/drone_sensors"
 OUT="${OUT_DIR:-$HERE/logs/model_all}"
 TO="${SCENARIO_TIMEOUT:-900}"
 mkdir -p "$OUT"
@@ -35,7 +35,7 @@ mkdir -p "$OUT"
 # 名前  スクリプト  土俵  マニフェスト（空なら既定）
 TABLE="
 s1 two_drone_avoid.py        noground -
-s2 scenario_s2_converging.py noground drone-a2-sensors-wide.json
+s2 scenario_s2_converging.py noground drone-sensors-wide.json
 s3 scenario_s3_overtaking.py noground -
 s4 scenario_s4_vertical.py   noground -
 s5 scenario_s5_landing.py    noground -

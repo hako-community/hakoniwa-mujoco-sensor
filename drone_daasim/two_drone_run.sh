@@ -41,11 +41,11 @@ A2_ENV="${A2_ENV:-$_ENV_DEFAULT}"
 # kinematic MuJoCo world, so the target injected into Drone's world does not have
 # to be the same object as the one injected into Drone1's.
 A2_ENV2="${A2_ENV2:-${_ENV2_DEFAULT:-$A2_ENV}}"
-A2_MANIFEST="${A2_MANIFEST:-$SENSOR_REPO/config/a2/drone-a2-sensors.json}"
+A2_MANIFEST="${A2_MANIFEST:-$SENSOR_REPO/config/drone_sensors/drone-sensors.json}"
 # Each aircraft may carry a DIFFERENT sensor fit -- e.g. one with a forward
 # radar and one with a rear sector (ISO 15964 8: mixing sensors).
 A2_MANIFEST2="${A2_MANIFEST2:-$A2_MANIFEST}"
-BRIDGE="${A2_BRIDGE:-$SENSOR_REPO/examples/envsim_sensor_a2/sensor_bridge_multi}"
+BRIDGE="${A2_BRIDGE:-$SENSOR_REPO/examples/drone_envsim_sensors/sensor_bridge_multi}"
 SENSOR_HZ="${A2_SENSOR_HZ:-20}"
 # Dual-radar option. OFF by default: the standard configs are untouched, so the
 # single-radar path runs on exactly the same files it always did. A2_DUAL_RADAR=1

@@ -180,7 +180,7 @@ Godot からの使用例は `examples/godot/`（**サンプル止まり**、godo
 
 ```bash
 # センサーブリッジをビルド（初回のみ）
-bash examples/envsim_sensor_a2/multi_build.bash
+bash examples/drone_envsim_sensors/multi_build.bash
 ```
 
 ### 使い方
@@ -240,12 +240,12 @@ bash drone_daasim/sensor_viz_run.sh window radar top
 
 実行時キー: `L`=LiDAR / `R`=Radar / `N`=なし、`C`=カメラ切替、`+`/`-`=ズーム。
 
-センサー構成はマニフェストで差し替えられる（`config/a2/`）。機体ごとに別構成も可能:
+センサー構成はマニフェストで差し替えられる（`config/drone_sensors/`）。機体ごとに別構成も可能:
 
 ```bash
 # 前方60° + 後方セクターの混成で追越を見る
-A2_MANIFEST=$PWD/config/a2/drone-a2-sensors.json \
-A2_MANIFEST2=$PWD/config/a2/drone-a2-sensors-rear.json \
+A2_MANIFEST=$PWD/config/drone_sensors/drone-sensors.json \
+A2_MANIFEST2=$PWD/config/drone_sensors/drone-sensors-rear.json \
   bash drone_daasim/two_drone_viz_run.sh window radar top 0.45 noground
 python3 drone_daasim/scenario_s3_overtaking.py
 ```
@@ -268,7 +268,7 @@ python3 drone_daasim/scenario_s3_overtaking.py
 
 ```bash
 # 1) pdudef にチャネルを宣言（全ロボットの reader/writer に入り、空き番号を自動採番）
-python3 examples/envsim_sensor_a2/add_sensor_channel.py \
+python3 examples/drone_envsim_sensors/add_sensor_channel.py \
         drone_daasim/config2/webavatar-2-radar2.json radar_points_left
 
 # 2) A-2 マニフェストに pdu_name: "radar_points_left" のセンサーを足す

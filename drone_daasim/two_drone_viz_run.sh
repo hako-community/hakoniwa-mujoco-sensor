@@ -57,9 +57,9 @@ A2_ENV="${A2_ENV:-$_ENV_DEFAULT}"
 # The two bridges may sense different worlds (see two_drone_run.sh).
 A2_ENV2="${A2_ENV2:-${_ENV2_DEFAULT:-$A2_ENV}}"
 A2_OBB="${A2_OBB:-${_OBB_DEFAULT:-$SENSOR_ENVS/open_field/open_field.obb.json}}"
-A2_MANIFEST="${A2_MANIFEST:-$SENSOR_REPO/config/a2/drone-a2-sensors.json}"
+A2_MANIFEST="${A2_MANIFEST:-$SENSOR_REPO/config/drone_sensors/drone-sensors.json}"
 A2_MANIFEST2="${A2_MANIFEST2:-$A2_MANIFEST}"
-BRIDGE="${A2_BRIDGE:-$SENSOR_REPO/examples/envsim_sensor_a2/sensor_bridge_multi}"
+BRIDGE="${A2_BRIDGE:-$SENSOR_REPO/examples/drone_envsim_sensors/sensor_bridge_multi}"
 SENSOR_HZ="${A2_SENSOR_HZ:-20}"
 # Dual-radar option. OFF by default: the standard configs are untouched, so the
 # single-radar path runs on exactly the same files it always did. A2_DUAL_RADAR=1

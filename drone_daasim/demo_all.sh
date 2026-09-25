@@ -15,7 +15,7 @@ source "$HERE/env.sh"
 REPO="$(cd "$HERE/.." && pwd)"
 OUT="${1:-$HERE/demo}"
 SECS="${2:-75}"
-CFG="$REPO/config/a2"
+CFG="$REPO/config/drone_sensors"
 mkdir -p "$OUT"
 
 rec() { bash "$HERE/demo_record.sh" "$@"; }
@@ -48,7 +48,7 @@ rec "$OUT/03_crossing_60deg_fails.mp4" \
 rec "$OUT/04_crossing_360deg.mp4" \
   "4. Same crossing with 360 deg azimuth" \
   "Rule 181: the aircraft that sees the other on its right gives way; the other holds course" \
-  "A2_MANIFEST=$CFG/drone-a2-sensors-360.json bash $HERE/two_drone_viz_run.sh window radar top 0.5 noground" \
+  "A2_MANIFEST=$CFG/drone-sensors-360.json bash $HERE/two_drone_viz_run.sh window radar top 0.5 noground" \
   "S2_START=4.0 $PYENV_PY $SCENARIOS_DIR/scenario_s2_converging.py" \
   "$SECS"
 
@@ -56,7 +56,7 @@ rec "$OUT/04_crossing_360deg.mp4" \
 rec "$OUT/05_dual_radar_overtaking.mp4" \
   "5. Two radars per aircraft - forward 60 deg + rear sector" \
   "S-3 overtaking. The rear sector (az 150..210) covers the blind spot behind each aircraft" \
-  "A2_DUAL_RADAR=1 A2_MANIFEST=$CFG/drone-a2-sensors-dual.json bash $HERE/two_drone_viz_run.sh window radar top 0.45 noground" \
+  "A2_DUAL_RADAR=1 A2_MANIFEST=$CFG/drone-sensors-dual.json bash $HERE/two_drone_viz_run.sh window radar top 0.45 noground" \
   "S3_GAP=3.0 $PYENV_PY $SCENARIOS_DIR/scenario_s3_overtaking.py" \
   "$SECS"
 

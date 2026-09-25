@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build the C-ABI shared library (formal Phase 2 deliverable) and its backend-
-# free smoke test. Mirrors examples/envsim_sensor_a2/build.bash's direct-g++
+# free smoke test. Mirrors examples/drone_envsim_sensors/build.bash's direct-g++
 # style so it works without a full CMake configure on this machine.
 #
 # The .so does NOT link libmujoco: the sensor model .cpp files only include

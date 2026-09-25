@@ -9,7 +9,7 @@
 > |---|---|
 > | `daa_metrics.py`（Well Clear・tau・採点） | ★ `daa_common.py`（**radar_fit / scan / PDU / fly_to** が本体。`radar_fit_test.py` と `probe_elevation.py` も使う） |
 > | `scenario_b1_faceoff.py`, `scenario_s2`〜`s8` | `env.sh` / `*_run.sh` / `cleanup.sh` / `takeoff.py` / `read_pos.py` |
-> | `two_drone_avoid.py`, `m6_avoid.py`, `verify_b1.py`, `probe_b1_cone.py` | `lidar_sensor_asset.py`, `m6_sensor_bridge.py`, `radar_fit_test.py`, `probe_elevation.py` |
+> | `two_drone_avoid.py`, `m6_avoid.py`, `verify_b1.py`, `probe_b1_cone.py` | `lidar_sensor_asset.py`, `daa_sensor_bridge.py`, `radar_fit_test.py`, `probe_elevation.py` |
 >
 > ★ **`env.sh` が `SCENARIOS_DIR` と `PYTHONPATH` を用意する**ので、ランナー `.sh` の
 > 使い方は変わらない。Companion リポジトリが無い場所にあるなら `COMPANION_REPO` か
@@ -130,7 +130,7 @@ A-2 センサ（LiDAR/Radar）を配信して Godot avatar で可視化・調査
 | `diag.sh` | 診断（advanceTimeStep / EventStart / register / status） |
 | `cleanup.sh` | stop + kill + reset（native/Godot/`sensor_bridge_multi` を kill） |
 | `run_sequence.sh [headless\|window]` | 上記を一括実行（bg 起動→start→diag） |
-| `a2_viz_run.sh [window\|headless]` | **A-2 センサ可視化デモ（LiDAR+Radar 常設配信）**。native→Godot(外部センシング+env再構築)→start→`sensor_bridge_multi` を順序保証で起動 |
+| `multi_sensor_viz_run.sh [window\|headless]` | **A-2 センサ可視化デモ（LiDAR+Radar 常設配信）**。native→Godot(外部センシング+env再構築)→start→`sensor_bridge_multi` を順序保証で起動 |
 
 ## 使い方
 
@@ -162,7 +162,7 @@ bash drone_daasim/cleanup.sh
 Godot に PDU 経由で可視化する。センシング対象（simple_room の env.xml）と表示ワールド
 （同 OBB を EnvRoomBuilder で再構築）が一致するので、点群を壁に対して確認できる。
 ```bash
-bash drone_daasim/a2_viz_run.sh window     # 既定=window(GL描画)。CI/無GUIは headless
+bash drone_daasim/multi_sensor_viz_run.sh window     # 既定=window(GL描画)。CI/無GUIは headless
 #   起動: cleanup → native → Godot(HAKO_EXTERNAL_SENSING=1 + HAKO_ENV_OBB=simple_room.obb.json)
 #         → hako-cmd start → sensor_bridge_multi
 #   配信: Drone/lidar_points(ch16) + Drone/radar_scan→radar_points(ch19)
@@ -172,7 +172,7 @@ bash drone_daasim/cleanup.sh
 ```
 上書き可能な環境変数: `A2_ENV`(env.xml) / `A2_OBB`(OBB json) / `A2_MANIFEST`(センサ選択) /
 `A2_BRIDGE`(bridge バイナリ) / `A2_SENSOR_HZ`(既定20)。
-前提: `sensor_bridge_multi` ビルド済み（`hakoniwa-mujoco-sensor/examples/envsim_sensor_a2/build.bash`）。
+前提: `sensor_bridge_multi` ビルド済み（`hakoniwa-mujoco-sensor/examples/drone_envsim_sensors/build.bash`）。
 
 ### C) 個別に手動起動（端末を分けて観察）
 ```bash
@@ -214,7 +214,7 @@ bash drone_daasim/diag.sh
 
 | 情報 | 出どころ |
 |---|---|
-| 何を積んでいるか / どこを向いているか（方位窓・マウント yaw） | A-2 マニフェスト（`config/a2/drone-a2-sensors*.json`） |
+| 何を積んでいるか / どこを向いているか（方位窓・マウント yaw） | A-2 マニフェスト（`config/drone_sensors/drone-sensors*.json`） |
 | どのチャネルに publish されるか | pdudef（`config2/webavatar-2-radar*.json`） |
 
 `two_drone_run.sh` / `two_drone_viz_run.sh` は起動時に実際に使った組み合わせを
@@ -228,7 +228,7 @@ bash two_drone_run.sh noground && python scenario_s3_overtaking.py
 #      追い越される側は相手を最後まで見つけられない（後方死角）
 
 # 前方 60° + 後方 150..210° の 2本
-A2_DUAL_RADAR=1 A2_MANIFEST=../config/a2/drone-a2-sensors-dual.json \
+A2_DUAL_RADAR=1 A2_MANIFEST=../config/drone_sensors/drone-sensors-dual.json \
   bash two_drone_run.sh noground && S3_GAP=3.0 python scenario_s3_overtaking.py
 #   -> [fit] Drone1: 2 radar(s): front_radar ch19 + rear_radar ch21 | 120 deg of 360
 #      追い越される側が rear_radar で 2.89 m に検知（シナリオ側は無改造）
@@ -240,7 +240,7 @@ fit は方位だけでなく**仰角の窓**も持つ。既定の `vertical_fov_
 ボアサイト中心の ±10° であり、距離 r で追える高度差は **r·tan(10°) ≒ 0.18r** しかない。
 最終進入中の機体は「近くて下」——まさにこの窓から外れる位置に来る。
 
-`config/a2/drone-a2-sensors-approach.json` は仰角を **-35..+10°（45°）** の
+`config/drone_sensors/drone-sensors-approach.json` は仰角を **-35..+10°（45°）** の
 **非対称**な窓に開く。水平線の下に必要な範囲は上より遥かに広いためである。
 
 ```bash
@@ -248,7 +248,7 @@ fit は方位だけでなく**仰角の窓**も持つ。既定の `vertical_fov_
 bash two_drone_run.sh noground && python scenario_s5_landing.py
 
 # 仰角を開いた fit で（シナリオ側は無改造）
-A2_MANIFEST=../config/a2/drone-a2-sensors-approach.json \
+A2_MANIFEST=../config/drone_sensors/drone-sensors-approach.json \
   bash two_drone_run.sh noground && python scenario_s5_landing.py
 ```
 
@@ -269,7 +269,7 @@ A2_MANIFEST=../config/a2/drone-a2-sensors-approach.json \
 狭い進入幾何では**仰角より方位が先に律速する**。`S5_START=4.0` の S-5 では
 初期 4 tick の未検知が全て `azimuth -52..-41 deg outside [-30,+30]` だった。
 
-`config/a2/drone-a2-sensors-approach-wide.json` は #7 の仰角窓に加えて方位を
+`config/drone_sensors/drone-sensors-approach-wide.json` は #7 の仰角窓に加えて方位を
 **150°** に開く。`points_per_second` は**立体角比 (150×45)/(60×20) = 5.625 倍**
 （1500 → 8438）。**軸を 2 本広げると代償は足し算ではなく掛け算**になる。
 
@@ -296,7 +296,7 @@ S-5 は毎 tick `MISS[...]` として記録する。
 上げ忘れた場合に、必要な値を計算して警告する:
 
 ```bash
-python examples/envsim_sensor_a2/validate_manifest.py config/a2/drone-a2-sensors-*.json
+python examples/drone_envsim_sensors/validate_manifest.py config/drone_sensors/drone-sensors-*.json
 #  front_radar: window 150x45 deg, 844 pts/scan -> 0.1250 pts/deg^2 (1.00x the baseline fit)
 #  [WARN] ... is 5.6x THINNER than the baseline -- it will detect less, at every range.
 #         raise points_per_second to ~8438 ...
