@@ -1,0 +1,12 @@
+{
+  "backend": "mujoco_geometric_raycast",
+  "capabilities": {
+    "multiple_returns": false,
+    "per_point_timestamp": false,
+    "material_reflectivity": "unsupported",
+    "motion_distortion": false,
+    "radar_multipath": false,
+    "doppler": true,
+    "ground_truth_object_id": true
+  }
+}

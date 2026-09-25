@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <cmath>
 #include <utility>
+#include <stdexcept>
 
 #include "config/json_config_utils.hpp"
 #include "common/json_utils.hpp"
 #include "sensors/radar/radar_math.hpp"
+#include "sensors/radar/radar_config_json.hpp"
 
 namespace hako::robots::sensor::radar
 {
@@ -34,7 +36,13 @@ RadarSensor::RadarSensor(std::shared_ptr<backend::IRayCaster> ray_caster)
 
 void RadarSensor::SetConfig(const RadarConfig& config)
 {
+    for (double v : {config.detection_probability_scale, config.false_alarm_probability})
+        if (!std::isfinite(v) || v < 0 || v > 1) throw std::invalid_argument("invalid radar probability");
+    for (double v : {config.clutter_velocity_stddev, config.doppler_stddev, config.doppler_resolution, config.range_resolution})
+        if (!std::isfinite(v) || v < 0) throw std::invalid_argument("invalid radar resolution/noise");
     config_ = config;
+    scan_count_ = 0;
+    effects_rng_.seed(config_.noise_seed ^ 0x9e3779b9U);
     rng_.seed(config_.noise_seed);
     RebuildNoisePipeline();
     scheduler_.StartReady(GetUpdatePeriodSec());
@@ -96,13 +104,16 @@ bool RadarSensor::LoadConfig(const std::string& config_path)
 
     hako::robots::config::ReadPduConfig(root, cfg.output.pdu_name, cfg.output.update_rate_hz);
 
+    cfg = RadarConfigFromJson(s, cfg);
     SetConfig(cfg);
     return true;
 }
 
 void RadarSensor::RebuildNoisePipeline()
 {
-    noise_pipeline_.Clear();
+    auto noise_model = std::make_unique<noise::GaussianNoiseModel>();
+    noise_model->Reseed(config_.noise_seed ^ 0x85ebca6bU);
+    noise_pipeline_ = noise::RangeNoisePipeline(std::move(noise_model));
     for (const auto& acc : config_.distance_accuracy) {
         noise::RangeNoiseRule rule {};
         rule.range.min = acc.range_min;
@@ -119,7 +130,10 @@ void RadarSensor::RebuildNoisePipeline()
 void RadarSensor::Reset()
 {
     scheduler_.Reset();
+    scan_count_ = 0;
+    effects_rng_.seed(config_.noise_seed ^ 0x9e3779b9U);
     rng_.seed(config_.noise_seed);
+    RebuildNoisePipeline();
 }
 
 double RadarSensor::GetUpdatePeriodSec() const
@@ -142,6 +156,8 @@ int RadarSensor::PointsPerScan() const
 void RadarSensor::Scan(const backend::SensorState& state, RadarScanFrame& out)
 {
     out.detections.clear();
+    out.target_trials = out.target_detections = out.empty_trials = out.false_alarms = 0;
+    out.doppler_squared_error_sum = 0;
     out.header.frame_id = config_.frame_id;
     out.header.stamp_sec = static_cast<double>(++scan_count_) * GetUpdatePeriodSec();
 
@@ -170,8 +186,26 @@ void RadarSensor::Scan(const backend::SensorState& state, RadarScanFrame& out)
 
         const backend::RayHit hit = ray_caster_->Cast(state.origin, world_dir, config_.range);
         if (!hit.hit) {
+            ++out.empty_trials;
+            if (config_.false_alarm_probability > 0 && uni01(effects_rng_) < config_.false_alarm_probability) {
+                RadarDetection clutter {};
+                double az, el, unused;
+                math::ToPolar(local_dir, az, el, unused);
+                clutter.azimuth = static_cast<float>(az);
+                clutter.altitude = static_cast<float>(el);
+                double range = config_.range * uni01(effects_rng_);
+                if (config_.range_resolution > 0) range = std::round(range / config_.range_resolution) * config_.range_resolution;
+                clutter.depth = static_cast<float>(std::clamp(range, 0.0, config_.range));
+                double velocity = 0;
+                if (config_.clutter_velocity_stddev > 0) velocity = std::normal_distribution<double>(0, config_.clutter_velocity_stddev)(effects_rng_);
+                if (config_.doppler_resolution > 0) velocity = std::round(velocity / config_.doppler_resolution) * config_.doppler_resolution;
+                clutter.velocity = static_cast<float>(velocity);
+                out.detections.push_back(clutter);
+                ++out.false_alarms;
+            }
             continue;
         }
+        ++out.target_trials;
 
         const types::Vector3 rel = hit.point - state.origin;
         const types::Vector3 local_hit = math::WorldToLocal(rel, state.forward, state.left, state.up);
@@ -193,16 +227,22 @@ void RadarSensor::Scan(const backend::SensorState& state, RadarScanFrame& out)
             ref_range = math::ScaleRangeByRcs(ref_range, hit.target_rcs_m2,
                                               config_.reference_rcs_m2);
         }
-        if (math::DetectionProbability(depth, ref_range,
+        if (config_.detection_probability_scale * math::DetectionProbability(depth, ref_range,
                                        config_.detection_falloff_exp) < uni01(rng_)) {
             continue;
         }
 
-        const double depth_noisy = noise_pipeline_.Apply(depth);
+        double depth_noisy = noise_pipeline_.Apply(depth);
         const double velocity = math::RelativeVelocity(hit.target_velocity, state.linear_velocity, world_dir);
+        double measured_velocity = velocity;
+        if (config_.doppler_stddev > 0) measured_velocity += std::normal_distribution<double>(0, config_.doppler_stddev)(effects_rng_);
+        if (config_.doppler_resolution > 0) measured_velocity = std::round(measured_velocity / config_.doppler_resolution) * config_.doppler_resolution;
+        if (config_.range_resolution > 0) depth_noisy = std::clamp(std::round(depth_noisy / config_.range_resolution) * config_.range_resolution, 0.0, config_.range);
+        ++out.target_detections;
+        out.doppler_squared_error_sum += (measured_velocity - velocity) * (measured_velocity - velocity);
 
         RadarDetection d {};
-        d.velocity = static_cast<float>(velocity);
+        d.velocity = static_cast<float>(measured_velocity);
         d.azimuth = static_cast<float>(azimuth);
         d.altitude = static_cast<float>(elevation);
         d.depth = static_cast<float>(depth_noisy);

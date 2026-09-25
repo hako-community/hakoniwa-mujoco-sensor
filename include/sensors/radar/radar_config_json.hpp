@@ -28,7 +28,7 @@ namespace hako::robots::sensor::radar
 {
     // `params` is the manifest's per-sensor "params" object. Anything absent
     // keeps the value already in `c`, so callers can pre-seed defaults.
-    inline RadarConfig RadarConfigFromJson(const nlohmann::json& p, RadarConfig c = RadarConfig{})
+    inline RadarConfig RadarConfigFromJson(const nlohmann::json& p, RadarConfig c)
     {
         c.frame_id = p.value("frame_id", c.frame_id);
         c.range = p.value("range", c.range);
@@ -42,6 +42,12 @@ namespace hako::robots::sensor::radar
         c.elevation_end_deg = p.value("elevation_end_deg", c.elevation_end_deg);
         c.points_per_second = p.value("points_per_second", c.points_per_second);
         c.noise_seed = p.value("noise_seed", c.noise_seed);
+        c.detection_probability_scale = p.value("detection_probability_scale", c.detection_probability_scale);
+        c.false_alarm_probability = p.value("false_alarm_probability", c.false_alarm_probability);
+        c.clutter_velocity_stddev = p.value("clutter_velocity_stddev", c.clutter_velocity_stddev);
+        c.doppler_stddev = p.value("doppler_stddev", c.doppler_stddev);
+        c.doppler_resolution = p.value("doppler_resolution", c.doppler_resolution);
+        c.range_resolution = p.value("range_resolution", c.range_resolution);
         c.output.update_rate_hz = p.value("update_rate_hz", c.output.update_rate_hz);
         // Distance-dependent detection. Keep detection_falloff_exp at 2: the ray
         // sampler already supplies the other factor of 1/R^2.
@@ -95,5 +101,11 @@ namespace hako::robots::sensor::radar
             }
         }
         return c;
+    }
+
+    inline RadarConfig RadarConfigFromJson(const nlohmann::json& p)
+    {
+        RadarConfig defaults;
+        return RadarConfigFromJson(p, defaults);
     }
 }

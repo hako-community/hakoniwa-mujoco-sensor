@@ -28,6 +28,7 @@
 #include "sensors/lidar/lidar_scan_sensor.hpp"
 #include "sensors/radar/radar_sensor.hpp"
 #include "sensors/radar/radar_config_json.hpp"   // manifest params -> RadarConfig (1 か所)
+#include "sensors/common/capability.hpp"
 #include "sensors/radar/radar_math.hpp"   // RadarEquationRange (link budget -> ref range)
 
 // converters (frame -> HakoCpp) and registry serializers (cpp2pdu)
@@ -79,7 +80,7 @@ namespace hako::robots::runtime
             sb * m.x + cb * m.y,
             m.z);
         st.origin = base.origin + r_mount;
-        const double yaw = by + m.yaw_deg * M_PI / 180.0;
+        const double yaw = by + m.yaw_deg * 3.14159265358979323846 / 180.0;
         const double c = std::cos(yaw);
         const double s = std::sin(yaw);
         st.forward = types::Vector3(c, s, 0.0);
@@ -242,6 +243,9 @@ namespace hako::robots::runtime
             const std::string pdu_robot = comp.value("pdu_robot", default_robot);
             const Mount mount = detail::ParseMount(comp);
             const nlohmann::json p = comp.value("params", nlohmann::json::object());
+            if (comp.contains("required_capabilities")) {
+                sensor::capability::Require(sensor::capability::Geometric(type), comp.at("required_capabilities"));
+            }
 
             if (type == "lidar_3d") {
                 sensor::lidar::Lidar3DConfig c {};
@@ -255,6 +259,11 @@ namespace hako::robots::runtime
                 c.vertical_fov_lower_deg = p.value("vertical_fov_lower_deg", c.vertical_fov_lower_deg);
                 c.horizontal_fov_start_deg = p.value("horizontal_fov_start_deg", c.horizontal_fov_start_deg);
                 c.horizontal_fov_end_deg = p.value("horizontal_fov_end_deg", c.horizontal_fov_end_deg);
+                c.channel_elevation_deg = p.value("channel_elevation_deg", c.channel_elevation_deg);
+                c.channel_firing_offset_sec = p.value("channel_firing_offset_sec", c.channel_firing_offset_sec);
+                c.empirical_intensity = p.value("empirical_intensity", c.empirical_intensity);
+                c.reflectivity = p.value("reflectivity", c.reflectivity);
+                c.intensity_reference_distance = p.value("intensity_reference_distance", c.intensity_reference_distance);
                 return std::make_unique<detail::Lidar3DComponent>(std::move(caster), c, id, pdu_name, pdu_robot, mount);
             }
             if (type == "lidar_2d") {

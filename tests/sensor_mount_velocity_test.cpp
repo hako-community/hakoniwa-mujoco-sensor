@@ -150,7 +150,7 @@ int main()
         // along world +y, so the lever-arm term rotates with it.
         {
             rt::BasePose base {};
-            base.yaw_rad = M_PI / 2.0;
+            base.yaw_rad = 3.14159265358979323846 / 2.0;
             base.angular_velocity = Vector3(0.0, 0.0, 1.0);
             const auto st = rt::MakeState(base, m);
             vec_close(st.origin, Vector3(0.0, 0.15, 0.0), 1e-12,

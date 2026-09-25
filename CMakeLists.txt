@@ -244,6 +244,17 @@ if(HAKO_SENSOR_BUILD_TESTS)
     )
     add_test(NAME radar_math_test COMMAND radar_math_test)
 
+    add_executable(range_fidelity_test tests/range_fidelity_test.cpp
+        src/sensors/lidar/lidar3d_sensor.cpp src/sensors/radar/radar_sensor.cpp
+        src/sensors/noise/range_noise.cpp src/sensors/noise/axis_noise.cpp)
+    target_compile_features(range_fidelity_test PRIVATE cxx_std_20)
+    target_include_directories(range_fidelity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${HAKO_MUJOCO_RUNTIME_DIR}/include ${MUJOCO_INCLUDE_DIR} ${NLOHMANN_JSON_INCLUDE_DIR})
+    if(MSVC)
+        target_compile_options(range_fidelity_test PRIVATE /utf-8)
+    endif()
+    add_test(NAME range_fidelity_test COMMAND range_fidelity_test)
+
     # Scan timestamps across the range sensors + their PDU headers.
     # Needs the PDU type headers (it asserts on the converted messages).
     if(EXISTS "${HAKO_PDU_TYPES_INCLUDE_DIR}/builtin_interfaces")
@@ -303,6 +314,8 @@ if(HAKO_SENSOR_BUILD_TESTS)
     # no running master and no hakoniwa packages.
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
+        add_test(NAME sensor_workflow_test COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/sensor_workflow_test.py)
         add_test(NAME radar_fit_test
                  COMMAND ${Python3_EXECUTABLE}
                          ${CMAKE_CURRENT_SOURCE_DIR}/drone_daasim/radar_fit_test.py)

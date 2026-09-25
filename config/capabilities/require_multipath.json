@@ -1,0 +1,5 @@
+{
+  "scenario_id": "radar-multipath-validation",
+  "required_capabilities": {"radar_multipath": true},
+  "on_missing": "fail"
+}

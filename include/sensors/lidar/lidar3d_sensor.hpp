@@ -33,6 +33,9 @@ namespace hako::robots::sensor::lidar
         std::uint32_t height {0};
         std::uint32_t width {0};
         std::vector<PointXYZI> points {};  // row-major: channel (pitch) outer, yaw inner
+        // Relative to scan start (stamp_sec - period). Parallel to points;
+        // deliberately separate from the legacy XYZI/PDU memory layout.
+        std::vector<double> point_time_offset_sec {};
     };
 
     // Config mirrors the Godot Default3DLiDARController parameters so the A-2
@@ -49,6 +52,11 @@ namespace hako::robots::sensor::lidar
         double vertical_fov_lower_deg {-25.0};
         double horizontal_fov_start_deg {-20.0};
         double horizontal_fov_end_deg {20.0};
+        std::vector<double> channel_elevation_deg {}; // empty: uniform vertical FOV
+        std::vector<double> channel_firing_offset_sec {}; // within one column interval
+        bool empirical_intensity {false};
+        double reflectivity {1.0}; // assumed scalar, not optical material simulation
+        double intensity_reference_distance {1.0};
     };
 
     // Backend-independent (Strategy C) 3D LiDAR. Ray cast injected via
@@ -71,6 +79,7 @@ namespace hako::robots::sensor::lidar
         bool ShouldUpdate(double delta_sec) override;
 
         void Scan(const backend::SensorState& state, Lidar3DFrame& out);
+        void ScanAt(const backend::SensorState& state, double scan_end_sec, Lidar3DFrame& out);
 
     private:
         std::shared_ptr<backend::IRayCaster> ray_caster_;

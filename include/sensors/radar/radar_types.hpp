@@ -22,6 +22,10 @@ namespace hako::robots::sensor::radar
     {
         MessageHeader header {};
         std::vector<RadarDetection> detections {};
+        // Per-ray opportunity metrics (not object-level tracking Pd/Pfa).
+        unsigned int target_trials {0}, target_detections {0};
+        unsigned int empty_trials {0}, false_alarms {0};
+        double doppler_squared_error_sum {0.0};
     };
 
     // Distance-accuracy rule, reused from the LiDAR/ultrasonic noise spec so a
@@ -97,6 +101,12 @@ namespace hako::robots::sensor::radar
         // per-target RCS is scaled from (math::ScaleRangeByRcs).
         double reference_rcs_m2 {1.0};            // sigma_ref
         unsigned int noise_seed {1U};
+        double detection_probability_scale {1.0};
+        double false_alarm_probability {0.0}; // per empty ray
+        double clutter_velocity_stddev {0.0}; // zero-mean stationary clutter, m/s
+        double doppler_stddev {0.0};
+        double doppler_resolution {0.0}; // m/s, zero disables binning
+        double range_resolution {0.0}; // metres, zero disables binning
         std::vector<RadarDistanceAccuracy> distance_accuracy {};
     };
 }

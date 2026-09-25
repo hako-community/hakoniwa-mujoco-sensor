@@ -56,5 +56,6 @@ namespace hako::robots::sensor::radar
         common::UpdateScheduler scheduler_ {};
         noise::RangeNoisePipeline noise_pipeline_;
         std::mt19937 rng_ {1U};
+        std::mt19937 effects_rng_ {2U};
     };
 }

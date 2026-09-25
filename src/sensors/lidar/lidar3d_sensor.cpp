@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <utility>
+#include <stdexcept>
 
 namespace hako::robots::sensor::lidar
 {
@@ -20,7 +21,21 @@ Lidar3DSensor::Lidar3DSensor(std::shared_ptr<backend::IRayCaster> ray_caster)
 
 void Lidar3DSensor::SetConfig(const Lidar3DConfig& config)
 {
+    if (config.channels <= 0 || config.rotations_per_second <= 0 || config.points_per_second <= 0 ||
+        !std::isfinite(config.reflectivity) || config.reflectivity < 0 || config.reflectivity > 1 ||
+        !std::isfinite(config.intensity_reference_distance) || config.intensity_reference_distance <= 0)
+        throw std::invalid_argument("invalid lidar schedule/intensity config");
+    const int columns = std::max(1, config.points_per_second / config.rotations_per_second / config.channels);
+    const double column_period = 1.0 / config.rotations_per_second / columns;
+    if ((!config.channel_elevation_deg.empty() && config.channel_elevation_deg.size() != static_cast<size_t>(config.channels)) ||
+        (!config.channel_firing_offset_sec.empty() && config.channel_firing_offset_sec.size() != static_cast<size_t>(config.channels)))
+        throw std::invalid_argument("lidar channel table size mismatch");
+    for (double x : config.channel_elevation_deg)
+        if (!std::isfinite(x) || x < -90 || x > 90) throw std::invalid_argument("invalid elevation");
+    for (double x : config.channel_firing_offset_sec)
+        if (!std::isfinite(x) || x < 0 || x >= column_period) throw std::invalid_argument("invalid firing offset");
     config_ = config;
+    scan_count_ = 0;
     scheduler_.Reset();
 }
 
@@ -47,6 +62,7 @@ int Lidar3DSensor::Width() const
 void Lidar3DSensor::Reset()
 {
     scheduler_.Reset();
+    scan_count_ = 0;
 }
 
 double Lidar3DSensor::GetUpdatePeriodSec() const
@@ -63,13 +79,20 @@ bool Lidar3DSensor::ShouldUpdate(double delta_sec)
 
 void Lidar3DSensor::Scan(const backend::SensorState& state, Lidar3DFrame& out)
 {
+    ScanAt(state, static_cast<double>(++scan_count_) * GetUpdatePeriodSec(), out);
+}
+
+void Lidar3DSensor::ScanAt(const backend::SensorState& state, double scan_end_sec, Lidar3DFrame& out)
+{
+    if (!std::isfinite(scan_end_sec) || scan_end_sec < 0) throw std::invalid_argument("invalid scan time");
     const int n_v = Height();
     const int n_h = Width();
     out.frame_id = config_.frame_id;
-    out.stamp_sec = static_cast<double>(++scan_count_) * GetUpdatePeriodSec();
+    out.stamp_sec = scan_end_sec;
     out.height = static_cast<std::uint32_t>(n_v);
     out.width = static_cast<std::uint32_t>(n_h);
     out.points.clear();
+    out.point_time_offset_sec.clear();
     if (ray_caster_ == nullptr || n_h <= 0) {
         return;
     }
@@ -85,7 +108,7 @@ void Lidar3DSensor::Scan(const backend::SensorState& state, Lidar3DFrame& out)
     const auto& up = state.up;
 
     for (int iv = 0; iv < n_v; ++iv) {
-        const double pitch_deg = (n_v == 1)
+        const double pitch_deg = !config_.channel_elevation_deg.empty() ? config_.channel_elevation_deg[iv] : (n_v == 1)
             ? 0.5 * (v_lo + v_hi)
             : v_lo + (v_hi - v_lo) * static_cast<double>(iv) / static_cast<double>(n_v - 1);
         const double elev = pitch_deg * kDeg2Rad;
@@ -114,6 +137,14 @@ void Lidar3DSensor::Scan(const backend::SensorState& state, Lidar3DFrame& out)
             if (hit.hit && hit.distance >= config_.min_distance && hit.distance <= config_.max_distance) {
                 depth = hit.distance;
                 intensity = 1.0F;
+                if (config_.empirical_intensity) {
+                    // Scalar inverse-square return. Unknown surface normal means
+                    // normal incidence; no claim of material/RTX equivalence.
+                    const double norm = std::sqrt(hit.normal.x*hit.normal.x + hit.normal.y*hit.normal.y + hit.normal.z*hit.normal.z);
+                    const double incidence = norm > 0 ? std::clamp(-(dir.x*hit.normal.x + dir.y*hit.normal.y + dir.z*hit.normal.z)/norm, 0.0, 1.0) : 1.0;
+                    const double ratio = config_.intensity_reference_distance / std::max(depth, 1e-9);
+                    intensity = static_cast<float>(std::clamp(config_.reflectivity * incidence * ratio * ratio, 0.0, 1.0));
+                }
             }
             // sensor-local cartesian (REP-103: x fwd, y left, z up)
             p.x = static_cast<float>(depth * ce * ca);
@@ -121,6 +152,10 @@ void Lidar3DSensor::Scan(const backend::SensorState& state, Lidar3DFrame& out)
             p.z = static_cast<float>(depth * se);
             p.intensity = intensity;
             out.points.push_back(p);
+            const double column_period = GetUpdatePeriodSec() / n_h;
+            const double offset = config_.channel_firing_offset_sec.empty()
+                ? column_period * iv / n_v : config_.channel_firing_offset_sec[iv];
+            out.point_time_offset_sec.push_back(ih * column_period + offset);
         }
     }
 }
