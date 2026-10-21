@@ -180,6 +180,13 @@ target_include_directories(hako_mujoco_sensor SYSTEM PUBLIC
     ${HAKO_PDU_TYPES_INCLUDE_DIR}
 )
 
+# カメラの .cpp は GLFW/glfw3.h を include するので、glfw の include パスをターゲットから受け取る。
+#   （以前は Windows で vcpkg の MuJoCo と GLFW のヘッダが同じ include にあり、たまたま見えていた。
+#     MuJoCo を公式版に分けたら見えなくなった。Linux は /usr/include にあるので気づかない）
+if(HAKO_SENSOR_BUILD_CAMERA)
+    target_link_libraries(hako_mujoco_sensor PUBLIC glfw OpenGL::GL)
+endif()
+
 if(MSVC)
     target_compile_options(hako_mujoco_sensor PRIVATE /W4)
 else()
