@@ -50,6 +50,32 @@ void RealSenseCameraSensor::SetCameraMotion(const CameraMotion& motion)
     fixed_motion_set_ = true;
 }
 
+void RealSenseCameraSensor::SetMaterialSource(std::shared_ptr<hako::robots::physics::IWorld> world)
+{
+    material_world_ = std::move(world);
+    materials_resolved_ = false;
+}
+
+void RealSenseCameraSensor::ResolveMaterials()
+{
+    materials_resolved_ = true;
+    materials_by_id_.clear();
+    const auto world = material_world_ ? material_world_ : motion_world_;
+    const mjModel* m = world ? world->getModel() : nullptr;
+    if (!m) {
+        std::cerr << "Warning: RealSense texture model has no material source; "
+                     "every pixel uses the default material" << std::endl;
+        return;
+    }
+    std::vector<std::string> names;
+    names.reserve(static_cast<std::size_t>(m->nmat));
+    for (int i = 0; i < m->nmat; ++i) {
+        const char* n = mj_id2name(m, mjOBJ_MATERIAL, i);
+        names.emplace_back(n ? n : "");
+    }
+    materials_by_id_ = config_.texture_model.materials.Resolve(names);
+}
+
 void RealSenseCameraSensor::Reset()
 {
     CameraSensorBase::Reset();
@@ -82,6 +108,9 @@ bool RealSenseCameraSensor::LoadConfig(const RealSenseConfig& config)
     depth_params_ = MakeDepthModelParams(config_);
     edge_params_ = MakeEdgeEffectsParams(config_, depth_params_);
     last_edge_stats_ = EdgeEffectsStats {};
+    texture_params_ = MakeTextureModelParams(config_);
+    last_texture_stats_ = TextureStats {};
+    materials_resolved_ = false;
 
     // Render config. The clip keeps a margin on both sides so the depth model
     // (not the GL clip) decides the invalid range: background beyond the far
@@ -124,6 +153,7 @@ bool RealSenseCameraSensor::LoadConfig(const RealSenseConfig& config)
 
     depth_rng_.seed(config_.depth_model.seed);
     edge_rng_.seed(config_.edge_effects.seed);
+    texture_rng_.seed(config_.texture_model.seed);
     rgb_noise_rng_.seed(config_.rgb_noise.seed);
     post_.Reset();
     StartScheduler(config_.depth.fps);
@@ -215,8 +245,17 @@ bool RealSenseCameraSensor::RenderDepth(DepthFrame& depth_out, ImageFrame* rgb_o
             last_edge_stats_ = ApplyEdgeEffects(depth_out.data, depth_out.width, depth_out.height,
                                                 edge_params_, edge_rng_);
         }
+        last_texture_stats_ = TextureStats {};
+        const std::vector<float>* sigma_scale = nullptr;
+        if (config_.texture_model.enabled) {
+            if (!materials_resolved_) ResolveMaterials();
+            last_texture_stats_ = ApplyTextureModel(
+                depth_out.data, depth_out.width, depth_out.height, &raw.material_ids, materials_by_id_,
+                config_.texture_model.materials.default_material, texture_params_, texture_rng_, sigma_scale_);
+            sigma_scale = &sigma_scale_;
+        }
         ApplyDepthModel(depth_out.data, depth_out.width, depth_out.height,
-                        depth_params_, depth_rng_, &raw.material_ids);
+                        depth_params_, depth_rng_, &raw.material_ids, sigma_scale);
         int w = depth_out.width;
         int h = depth_out.height;
         post_.Apply(depth_out.data, w, h, depth_params_.fx_px, depth_params_.baseline_m,

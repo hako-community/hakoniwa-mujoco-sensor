@@ -10,6 +10,8 @@
 //   -> rolling-shutter distortion  (rolling streams only, needs SetMotionSource)
 //   -> depth-edge effects          (realsense_edge_effects.hpp, optional: occlusion
 //                                   shadow + flying pixels)
+//   -> weak-pattern holes          (realsense_texture_model.hpp, optional: material
+//                                   table by MuJoCo material name, projector, ambient)
 //   -> stereo depth model          (realsense_depth_model.hpp)
 //   -> post-processing             (librealsense-style filters, optional)
 //
@@ -58,6 +60,10 @@ namespace hako::robots::sensor::camera::realsense
         void SetMotionSource(std::shared_ptr<hako::robots::physics::IWorld> world);
         // Fixed motion (optical frame) instead of the world, e.g. for tests.
         void SetCameraMotion(const CameraMotion& motion);
+        // Model whose material names are looked up in the material table (RS-2).
+        // Without it the motion source is used; without both every pixel uses the
+        // table's default material.
+        void SetMaterialSource(std::shared_ptr<hako::robots::physics::IWorld> world);
 
         void Reset() override;
 
@@ -68,6 +74,10 @@ namespace hako::robots::sensor::camera::realsense
         const EdgeEffectsParams& GetEdgeEffectsParams() const { return edge_params_; }
         // Counts of the last depth capture (zero when edge effects are off).
         const EdgeEffectsStats& GetLastEdgeEffectsStats() const { return last_edge_stats_; }
+        const TextureModelParams& GetTextureModelParams() const { return texture_params_; }
+        const TextureStats& GetLastTextureStats() const { return last_texture_stats_; }
+        // IR material per MuJoCo material id (resolved at the first capture).
+        const std::vector<IrMaterial>& GetResolvedMaterials() const { return materials_by_id_; }
         bool HasRgb() const { return config_.RgbEnabled(); }
 
         // RGB is cleared when the model has no RGB or the stream is disabled.
@@ -79,6 +89,7 @@ namespace hako::robots::sensor::camera::realsense
         bool RenderRgb(ImageFrame& rgb_out);
         bool SharedRender() const;
         CameraMotion MotionOf(const std::string& camera_name) const;
+        void ResolveMaterials();
         void ProcessRgb(ImageFrame& rgb, const CameraMotion& motion, const std::vector<float>* ref_depth);
 
         std::shared_ptr<MujocoCameraRenderer> renderer_;
@@ -97,6 +108,13 @@ namespace hako::robots::sensor::camera::realsense
         DepthPostProcessor post_ {};
         std::mt19937 depth_rng_;
         std::mt19937 edge_rng_;   // separate stream: enabling edges keeps the depth noise sequence
+        std::shared_ptr<hako::robots::physics::IWorld> material_world_;
+        TextureModelParams texture_params_ {};
+        TextureStats last_texture_stats_ {};
+        std::vector<IrMaterial> materials_by_id_ {};
+        bool materials_resolved_ {false};
+        std::vector<float> sigma_scale_ {};
+        std::mt19937 texture_rng_;
         std::mt19937 rgb_noise_rng_;
     };
 }

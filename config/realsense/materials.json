@@ -1,0 +1,22 @@
+{
+  "_note": [
+    "IR material table for RealSense texture_model (RS-2). Keys of 'assign' are MuJoCo material names;",
+    "'*' matches any characters. Exact names win, otherwise the longest matching pattern.",
+    "ALL VALUES ARE ASSUMPTIONS (typical tendencies at ~850 nm), not measurements.",
+    "Built-in presets: machined_aluminum, ground_steel, cast_iron, black_oxide, black_resin,",
+    "white_resin, cardboard, concrete, glass. 'presets' below adds to / overrides them."
+  ],
+  "presets": {
+    "blasted_aluminum": { "base": "machined_aluminum", "specular": 0.3, "texture": 0.3 }
+  },
+  "assign": {
+    "work_black*": "black_oxide",
+    "work_cast*": "cast_iron",
+    "work_*": "machined_aluminum",
+    "bin_*": "cardboard",
+    "tray_*": "black_resin",
+    "floor*": "concrete",
+    "glass*": "glass"
+  },
+  "default": "white_resin"
+}

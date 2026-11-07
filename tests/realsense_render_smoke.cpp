@@ -13,7 +13,11 @@
 //   - the generic DepthCameraSensor still works next to it (existing API),
 //   - RS-1: a box at 0.6 m in front of a wall at 1.0 m (camera looking -x) casts an
 //     occlusion shadow of fx*B*(1/0.6 - 1/1.0) px on its left and gets flying
-//     pixels on its edges; with edge effects off the output is bit-identical.
+//     pixels on its edges; with edge effects off the output is bit-identical,
+//   - RS-2: three panels at 2.45 m (camera looking -y) with MuJoCo materials mapped
+//     by config/realsense/materials.json: black oxide loses most depth, aluminum and
+//     cardboard stay valid; with the projector off the texture-less aluminum is lost
+//     and the textured cardboard keeps part; texture model off is bit-identical.
 
 #include <algorithm>
 #include <cmath>
@@ -23,6 +27,7 @@
 #include <vector>
 
 #include <mujoco/mujoco.h>
+#include <nlohmann/json.hpp>
 
 #include "physics.hpp"
 #include "sensors/camera/camera_sensor.hpp"
@@ -42,6 +47,9 @@ const char* kScene = R"(
   <asset>
     <material name="wall_mat" rgba="0.8 0.7 0.6 1"/>
     <material name="pole_mat" rgba="0.1 0.1 0.1 1"/>
+    <material name="work_black_plate" rgba="0.05 0.05 0.05 1"/>
+    <material name="work_alu_plate" rgba="0.7 0.7 0.75 1"/>
+    <material name="bin_card" rgba="0.6 0.45 0.3 1"/>
   </asset>
   <worldbody>
     <light pos="0 0 3" dir="0 0 -1"/>
@@ -56,6 +64,11 @@ const char* kScene = R"(
     <camera name="rs_edge" pos="0 0 1" xyaxes="0 1 0 0 0 1"/>
     <geom name="rear_wall" type="box" pos="-1.05 0 1" size="0.05 20 20" material="wall_mat"/>
     <geom name="edge_box" type="box" pos="-0.65 0 1" size="0.05 0.1 0.1" material="pole_mat"/>
+    <camera name="rs_mat" pos="0 0 1" xyaxes="-1 0 0 0 0 1"/>
+    <geom name="backdrop" type="box" pos="0 -3.05 1" size="20 0.05 20" material="wall_mat"/>
+    <geom name="panel_black" type="box" pos="0.45 -2.5 1" size="0.2 0.05 0.3" material="work_black_plate"/>
+    <geom name="panel_alu" type="box" pos="0 -2.5 1" size="0.2 0.05 0.3" material="work_alu_plate"/>
+    <geom name="panel_card" type="box" pos="-0.45 -2.5 1" size="0.2 0.05 0.3" material="bin_card"/>
   </worldbody>
 </mujoco>
 )";
@@ -449,6 +462,79 @@ int main()
                     mf.missing_rate, mf.outlier_rate, mf.rms_m * 1e3);
         check(mf.missing_rate > mb.missing_rate && mf.outlier_rate > mb.outlier_rate,
               "edges add missing pixels and outliers");
+    }
+
+    std::printf("[RS-2 D435 texture model: black / aluminum / cardboard panels at 2.45 m]\n");
+    {
+        // Panel columns (camera right = world -x): black x=+0.45, aluminum 0, cardboard -0.45.
+        const int cols[3][2] = {{313, 370}, {395, 452}, {477, 534}};
+        const char* names[3] = {"black oxide", "aluminum", "cardboard"};
+        const auto hole_rate = [&](const cam::DepthFrame& f, int k) {
+            std::size_t n = 0, holes = 0;
+            for (int y = 210; y <= 270; ++y) {
+                for (int x = cols[k][0]; x <= cols[k][1]; ++x) {
+                    ++n;
+                    holes += std::isfinite(f.data[static_cast<std::size_t>(y) * f.width + x]) ? 0u : 1u;
+                }
+            }
+            return static_cast<double>(holes) / static_cast<double>(n);
+        };
+        const auto j = nlohmann::json::parse(R"({ "model": "D435",
+            "texture_model": { "enabled": true, "materials": "materials.json", "seed": 3 } })");
+        rs::RealSenseConfig c {};
+        std::string err;
+        check(rs::RealSenseConfigFromJson(j, c, err, std::string(HAKO_SENSOR_SOURCE_DIR) + "/config/realsense"),
+              "config with materials.json: " + err);
+        c.depth_model.seed = 5;
+        rs::RealSenseCameraSensor sensor(renderer, "rs_mat");
+        sensor.SetMaterialSource(world);
+        check(sensor.LoadConfig(c), "LoadConfig (texture model)");
+        cam::DepthFrame depth;
+        sensor.CaptureDepth(depth);
+        double hr[3];
+        for (int k = 0; k < 3; ++k) hr[k] = hole_rate(depth, k);
+        std::printf("  projector on : holes %s %.3f, %s %.3f, %s %.3f\n", names[0], hr[0], names[1], hr[1], names[2], hr[2]);
+        const auto& mats = sensor.GetResolvedMaterials();
+        const int black_id = mj_name2id(world->getModel(), mjOBJ_MATERIAL, "work_black_plate");
+        check(black_id >= 0 && static_cast<std::size_t>(black_id) < mats.size()
+                  && mats[static_cast<std::size_t>(black_id)].ir_reflectance == 0.05,
+              "work_black_plate -> black_oxide via work_black*");
+        // Model value on the optical axis (the patch is within ~15 deg of it).
+        const auto& tp = sensor.GetTextureModelParams();
+        const double want_black = 1.0 - rs::ValidProbability(
+            tp, rs::TextureSnr(tp, mats[static_cast<std::size_t>(black_id)], 2.45, 1.0));
+        close_to(hr[0], want_black, 0.08, "black oxide at 2.45 m: hole rate follows the model");
+        check(hr[0] > 0.3, "black oxide loses a large part of the depth");
+        check(hr[1] < 0.02 && hr[2] < 0.02, "aluminum and cardboard stay valid");
+        check(sensor.GetLastTextureStats().holes > 0, "stats report holes");
+
+        c.texture_model.laser_power_mw = 0.0;
+        check(sensor.LoadConfig(c), "LoadConfig (projector off)");
+        sensor.CaptureDepth(depth);
+        for (int k = 0; k < 3; ++k) hr[k] = hole_rate(depth, k);
+        std::printf("  projector off: holes %s %.3f, %s %.3f, %s %.3f\n", names[0], hr[0], names[1], hr[1], names[2], hr[2]);
+        check(hr[1] > 0.9, "projector off: texture-less aluminum is lost");
+        check(hr[2] > 0.3 && hr[2] < 0.7, "projector off: textured cardboard keeps about half");
+
+        // Texture model off (table still loaded): bit-identical to the plain config.
+        rs::RealSenseConfig plain {};
+        rs::MakeDefaultConfig("D435", plain);
+        plain.depth_model.seed = 5;
+        rs::RealSenseConfig off = c;
+        off.texture_model.enabled = false;
+        rs::RealSenseCameraSensor sp(renderer, "rs_mat");
+        rs::RealSenseCameraSensor so(renderer, "rs_mat");
+        so.SetMaterialSource(world);
+        check(sp.LoadConfig(plain) && so.LoadConfig(off), "LoadConfig (regression pair)");
+        cam::DepthFrame dp;
+        cam::DepthFrame dof;
+        sp.CaptureDepth(dp);
+        so.CaptureDepth(dof);
+        bool same = dp.data.size() == dof.data.size();
+        for (std::size_t i = 0; same && i < dp.data.size(); ++i) {
+            same = (std::isnan(dp.data[i]) && std::isnan(dof.data[i])) || dp.data[i] == dof.data[i];
+        }
+        check(same, "texture model off -> bit-identical depth");
     }
 
     std::printf("realsense_render_smoke: %d/%d checks passed\n", g_checks - g_failures, g_checks);

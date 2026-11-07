@@ -27,6 +27,18 @@
     "flying_pixels": { "enabled": true, "window_px": 7, "jump_ratio": 0.05, "probability": 0.5 },
     "seed": 13
   },
+  "texture_model": {
+    "enabled": false,
+    "materials": "materials.json",
+    "laser_power_mw": 150,
+    "ambient_ir": 0.1,
+    "reference_range_m": 10.0,
+    "steepness": 6.0,
+    "noise_gain": 0.5,
+    "ambient_noise_gain": 10.0,
+    "passive_gain": 20.0,
+    "seed": 17
+  },
   "post_processing": {
     "enabled": false,
     "disparity_domain": true,

@@ -20,6 +20,8 @@
 //   "edge_effects": { "enabled": false, "occlusion": true,
 //                     "flying_pixels": { "enabled": true, "window_px": 7, "jump_ratio": 0.05,
 //                                        "probability": 0.5 }, "seed": 0 },
+//   "texture_model": { "enabled": false, "materials": "materials.json" | { ... },
+//                      "laser_power_mw": 150, "ambient_ir": 0.1, "seed": 0 },
 //   "post_processing": { "enabled": false, "decimation": {...}, "threshold": {...},
 //                        "spatial": {...}, "temporal": {...}, "hole_filling": {...} },
 //   "imu": { "enabled": true, "accel_rate_hz": 250, "gyro_rate_hz": 400,
@@ -42,6 +44,7 @@
 #include "sensors/camera/realsense/realsense_imu_model.hpp"
 #include "sensors/camera/realsense/realsense_post_processing.hpp"
 #include "sensors/camera/realsense/realsense_profile.hpp"
+#include "sensors/camera/realsense/realsense_texture_model.hpp"
 
 namespace hako::robots::sensor::camera::realsense
 {
@@ -107,6 +110,22 @@ namespace hako::robots::sensor::camera::realsense
         std::uint32_t seed {0};
     };
 
+    // RS-2: material table + weak-pattern holes (default off). Gains are assumptions.
+    struct TextureModelConfig
+    {
+        bool enabled {false};
+        MaterialTable materials {};
+        std::string materials_source {};   // file the table was read from ("" = inline / built-in)
+        double laser_power_mw {150.0};
+        double ambient_ir {0.1};
+        double reference_range_m {10.0};
+        double steepness {6.0};
+        double noise_gain {0.5};
+        double ambient_noise_gain {10.0};
+        double passive_gain {20.0};
+        std::uint32_t seed {0};
+    };
+
     struct RealSenseConfig
     {
         RealSenseProfile profile {};     // built-in profile with overrides applied
@@ -117,6 +136,7 @@ namespace hako::robots::sensor::camera::realsense
         DepthModelConfig depth_model {};
         RollingShutterConfig rolling_shutter {};
         EdgeEffectsConfig edge_effects {};
+        TextureModelConfig texture_model {};
         PostProcessingConfig post_processing {};
         ImuModelConfig imu {};
 
@@ -210,6 +230,25 @@ namespace hako::robots::sensor::camera::realsense
         return e;
     }
 
+    // Texture-model parameters for the configured depth stream (render size).
+    inline TextureModelParams MakeTextureModelParams(const RealSenseConfig& c)
+    {
+        TextureModelParams t {};
+        const auto& m = c.texture_model;
+        t.laser_power_mw = m.laser_power_mw;
+        t.ambient_ir = m.ambient_ir;
+        t.reference_range_m = m.reference_range_m;
+        t.steepness = m.steepness;
+        t.noise_gain = m.noise_gain;
+        t.ambient_noise_gain = m.ambient_noise_gain;
+        t.passive_gain = m.passive_gain;
+        t.fx_px = FocalLengthPx(c.depth.width, c.profile.DepthHfovRad());
+        t.fy_px = t.fx_px;
+        t.cx_px = c.depth.width * 0.5;
+        t.cy_px = c.depth.height * 0.5;
+        return t;
+    }
+
     // Returns an empty string when valid, otherwise the reason.
     // Requests beyond the catalogue limits (resolution / fps) are allowed but
     // reported through `warnings`.
@@ -241,6 +280,10 @@ namespace hako::robots::sensor::camera::realsense
         const auto& fp = c.edge_effects.flying_pixels;
         if (fp.window_px < 1.0 || fp.jump_ratio <= 0.0 || fp.probability < 0.0 || fp.probability > 1.0)
             return "invalid edge_effects.flying_pixels";
+        const auto& tm = c.texture_model;
+        if (tm.laser_power_mw < 0.0 || tm.ambient_ir < 0.0 || tm.reference_range_m <= 0.0 || tm.steepness <= 0.0
+            || tm.noise_gain < 0.0 || tm.ambient_noise_gain < 0.0 || tm.passive_gain < 0.0)
+            return "invalid texture_model";
         if (c.ImuEnabled()) {
             if (c.imu.accel_rate_hz <= 0.0 || c.imu.gyro_rate_hz <= 0.0) return "invalid imu rate";
             if (c.imu.bias_mode != "none" && c.imu.bias_mode != "calibrated" && c.imu.bias_mode != "uncalibrated")
@@ -367,7 +410,9 @@ namespace hako::robots::sensor::camera::realsense
 
     // Parses a config object. Unknown keys are ignored; missing keys keep the
     // model defaults. On error returns false and writes the reason to `error`.
-    inline bool RealSenseConfigFromJson(const nlohmann::json& root, RealSenseConfig& out, std::string& error)
+    // `base_dir`: directory for relative paths inside the config (the material table).
+    inline bool RealSenseConfigFromJson(const nlohmann::json& root, RealSenseConfig& out, std::string& error,
+                                        const std::string& base_dir = "")
     {
         try {
             if (!root.is_object() || !root.contains("model") || !root.at("model").is_string()) {
@@ -439,6 +484,44 @@ namespace hako::robots::sensor::camera::realsense
                     detail::ReadIf(f, "probability", fp.probability);
                 }
             }
+            if (root.contains("texture_model") && root.at("texture_model").is_object()) {
+                const auto& t = root.at("texture_model");
+                auto& tm = c.texture_model;
+                detail::ReadIf(t, "enabled", tm.enabled);
+                detail::ReadIf(t, "laser_power_mw", tm.laser_power_mw);
+                detail::ReadIf(t, "ambient_ir", tm.ambient_ir);
+                detail::ReadIf(t, "reference_range_m", tm.reference_range_m);
+                detail::ReadIf(t, "steepness", tm.steepness);
+                detail::ReadIf(t, "noise_gain", tm.noise_gain);
+                detail::ReadIf(t, "ambient_noise_gain", tm.ambient_noise_gain);
+                detail::ReadIf(t, "passive_gain", tm.passive_gain);
+                detail::ReadIf(t, "seed", tm.seed);
+                if (t.contains("materials")) {
+                    const auto& mj = t.at("materials");
+                    nlohmann::json table;
+                    if (mj.is_string()) {
+                        std::string path = mj.get<std::string>();
+                        const bool absolute = !path.empty()
+                            && (path[0] == '/' || path[0] == '\\' || (path.size() > 1 && path[1] == ':'));
+                        if (!absolute && !base_dir.empty()) path = base_dir + "/" + path;
+                        std::ifstream ifs(path);
+                        if (!ifs.is_open()) {
+                            error = "cannot open material table '" + path + "'";
+                            return false;
+                        }
+                        try {
+                            ifs >> table;
+                        } catch (const std::exception& e) {
+                            error = "cannot parse material table '" + path + "': " + e.what();
+                            return false;
+                        }
+                        tm.materials_source = path;
+                    } else {
+                        table = mj;
+                    }
+                    if (!MaterialTableFromJson(table, tm.materials, error)) return false;
+                }
+            }
             if (root.contains("post_processing") && root.at("post_processing").is_object()) {
                 detail::ReadPostProcessing(root.at("post_processing"), c.post_processing);
             }
@@ -482,7 +565,9 @@ namespace hako::robots::sensor::camera::realsense
             return false;
         }
         std::string error;
-        if (!RealSenseConfigFromJson(root, out, error)) {
+        const auto slash = path.find_last_of("/\\");
+        const std::string base_dir = slash == std::string::npos ? std::string(".") : path.substr(0, slash);
+        if (!RealSenseConfigFromJson(root, out, error, base_dir)) {
             std::cerr << "Invalid RealSense config '" << path << "': " << error << std::endl;
             return false;
         }

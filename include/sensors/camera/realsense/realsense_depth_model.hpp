@@ -76,13 +76,16 @@ namespace hako::robots::sensor::camera::realsense
     }
 
     // Applies the model in place. `material_ids` (same size, -1 = none) may be null.
+    // `sigma_scale` (same size) multiplies the disparity sigma per pixel (RS-2: a
+    // weak projector pattern gives a noisier match); null = 1 everywhere.
     inline void ApplyDepthModel(
         std::vector<float>& depth,
         int width,
         int height,
         const DepthModelParams& m,
         std::mt19937& rng,
-        const std::vector<int>* material_ids = nullptr)
+        const std::vector<int>* material_ids = nullptr,
+        const std::vector<float>* sigma_scale = nullptr)
     {
         if (width <= 0 || height <= 0) return;
         const std::size_t n = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
@@ -94,6 +97,7 @@ namespace hako::robots::sensor::camera::realsense
         std::uniform_real_distribution<double> uniform(0.0, 1.0);
         const bool use_materials = material_ids != nullptr
             && material_ids->size() == n && !m.invalid_material_ids.empty();
+        const bool use_scale = sigma_scale != nullptr && sigma_scale->size() == n;
 
         for (int y = 0; y < height; ++y) {
             for (int x = 0; x < width; ++x) {
@@ -134,7 +138,8 @@ namespace hako::robots::sensor::camera::realsense
                     // 3. disparity noise
                     double d = fb / z;
                     if (m.disparity_sigma_px > 0.0) {
-                        d += m.disparity_sigma_px * disparity_noise(rng);
+                        const double scale = use_scale ? static_cast<double>((*sigma_scale)[i]) : 1.0;
+                        d += m.disparity_sigma_px * scale * disparity_noise(rng);
                     }
                     // 4. subpixel quantisation
                     if (m.subpixel_step_px > 0.0) {
