@@ -17,6 +17,9 @@
 //                    "invalid_probability": 0.0, "invalid_material_ids": [],
 //                    "material_invalid_probability": 1.0, "seed": 0 },
 //   "rolling_shutter": { "enabled": true, "depth_readout_s": null, "rgb_readout_s": null },
+//   "edge_effects": { "enabled": false, "occlusion": true,
+//                     "flying_pixels": { "enabled": true, "window_px": 7, "jump_ratio": 0.05,
+//                                        "probability": 0.5 }, "seed": 0 },
 //   "post_processing": { "enabled": false, "decimation": {...}, "threshold": {...},
 //                        "spatial": {...}, "temporal": {...}, "hole_filling": {...} },
 //   "imu": { "enabled": true, "accel_rate_hz": 250, "gyro_rate_hz": 400,
@@ -35,6 +38,7 @@
 #include <nlohmann/json.hpp>
 
 #include "sensors/camera/realsense/realsense_depth_model.hpp"
+#include "sensors/camera/realsense/realsense_edge_effects.hpp"
 #include "sensors/camera/realsense/realsense_imu_model.hpp"
 #include "sensors/camera/realsense/realsense_post_processing.hpp"
 #include "sensors/camera/realsense/realsense_profile.hpp"
@@ -85,6 +89,24 @@ namespace hako::robots::sensor::camera::realsense
         double rgb_readout_s {-1.0};
     };
 
+    // RS-1: occlusion shadow + flying pixels at depth edges (default off).
+    // window_px / jump_ratio / probability are assumptions (D4 window not published).
+    struct FlyingPixelsConfig
+    {
+        bool enabled {true};
+        double window_px {7.0};          // matching window at 848 px width
+        double jump_ratio {0.05};        // neighbour step > ratio * nearer depth = discontinuity
+        double probability {0.5};
+    };
+
+    struct EdgeEffectsConfig
+    {
+        bool enabled {false};
+        bool occlusion {true};
+        FlyingPixelsConfig flying_pixels {};
+        std::uint32_t seed {0};
+    };
+
     struct RealSenseConfig
     {
         RealSenseProfile profile {};     // built-in profile with overrides applied
@@ -94,6 +116,7 @@ namespace hako::robots::sensor::camera::realsense
         RgbNoiseConfig rgb_noise {};
         DepthModelConfig depth_model {};
         RollingShutterConfig rolling_shutter {};
+        EdgeEffectsConfig edge_effects {};
         PostProcessingConfig post_processing {};
         ImuModelConfig imu {};
 
@@ -170,6 +193,23 @@ namespace hako::robots::sensor::camera::realsense
         return m;
     }
 
+    // Edge-effect parameters for the configured depth stream (render size).
+    inline EdgeEffectsParams MakeEdgeEffectsParams(const RealSenseConfig& c, const DepthModelParams& m)
+    {
+        EdgeEffectsParams e {};
+        e.fx_px = m.fx_px;
+        e.baseline_m = m.baseline_m;
+        e.occlusion = c.edge_effects.enabled && c.edge_effects.occlusion;
+        const auto& f = c.edge_effects.flying_pixels;
+        e.flying_pixels = c.edge_effects.enabled && f.enabled;
+        e.window_radius_px = FlyingWindowRadiusPx(f.window_px, c.depth.width);
+        e.jump_ratio = f.jump_ratio;
+        e.probability = f.probability;
+        e.min_z_m = m.min_z_m;
+        e.max_z_m = m.max_z_m;
+        return e;
+    }
+
     // Returns an empty string when valid, otherwise the reason.
     // Requests beyond the catalogue limits (resolution / fps) are allowed but
     // reported through `warnings`.
@@ -198,6 +238,9 @@ namespace hako::robots::sensor::camera::realsense
         if (pp.temporal.alpha < 0.0 || pp.temporal.alpha > 1.0 || pp.temporal.delta <= 0.0
             || pp.temporal.persistency < 0 || pp.temporal.persistency > 8) return "invalid temporal filter";
         if (pp.hole_filling.mode < 0 || pp.hole_filling.mode > 2) return "invalid hole filling mode";
+        const auto& fp = c.edge_effects.flying_pixels;
+        if (fp.window_px < 1.0 || fp.jump_ratio <= 0.0 || fp.probability < 0.0 || fp.probability > 1.0)
+            return "invalid edge_effects.flying_pixels";
         if (c.ImuEnabled()) {
             if (c.imu.accel_rate_hz <= 0.0 || c.imu.gyro_rate_hz <= 0.0) return "invalid imu rate";
             if (c.imu.bias_mode != "none" && c.imu.bias_mode != "calibrated" && c.imu.bias_mode != "uncalibrated")
@@ -381,6 +424,20 @@ namespace hako::robots::sensor::camera::realsense
                 detail::ReadIf(r, "enabled", c.rolling_shutter.enabled);
                 detail::ReadIf(r, "depth_readout_s", c.rolling_shutter.depth_readout_s);
                 detail::ReadIf(r, "rgb_readout_s", c.rolling_shutter.rgb_readout_s);
+            }
+            if (root.contains("edge_effects") && root.at("edge_effects").is_object()) {
+                const auto& e = root.at("edge_effects");
+                detail::ReadIf(e, "enabled", c.edge_effects.enabled);
+                detail::ReadIf(e, "occlusion", c.edge_effects.occlusion);
+                detail::ReadIf(e, "seed", c.edge_effects.seed);
+                if (e.contains("flying_pixels") && e.at("flying_pixels").is_object()) {
+                    const auto& f = e.at("flying_pixels");
+                    auto& fp = c.edge_effects.flying_pixels;
+                    detail::ReadIf(f, "enabled", fp.enabled);
+                    detail::ReadIf(f, "window_px", fp.window_px);
+                    detail::ReadIf(f, "jump_ratio", fp.jump_ratio);
+                    detail::ReadIf(f, "probability", fp.probability);
+                }
             }
             if (root.contains("post_processing") && root.at("post_processing").is_object()) {
                 detail::ReadPostProcessing(root.at("post_processing"), c.post_processing);

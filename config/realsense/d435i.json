@@ -21,6 +21,12 @@
     "seed": 7
   },
   "rolling_shutter": { "enabled": true },
+  "edge_effects": {
+    "enabled": false,
+    "occlusion": true,
+    "flying_pixels": { "enabled": true, "window_px": 7, "jump_ratio": 0.05, "probability": 0.5 },
+    "seed": 13
+  },
   "post_processing": {
     "enabled": false,
     "disparity_domain": true,

@@ -286,6 +286,16 @@ if(HAKO_SENSOR_BUILD_TESTS)
     endif()
     add_test(NAME realsense_effects_test COMMAND realsense_effects_test)
 
+    # RealSense depth-edge effects (occlusion shadow, flying pixels) + depth metrics (pure).
+    add_executable(realsense_edge_effects_test tests/realsense_edge_effects_test.cpp)
+    target_compile_features(realsense_edge_effects_test PRIVATE cxx_std_20)
+    target_include_directories(realsense_edge_effects_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(realsense_edge_effects_test SYSTEM PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+    if(MSVC)
+        target_compile_options(realsense_edge_effects_test PRIVATE /utf-8)
+    endif()
+    add_test(NAME realsense_edge_effects_test COMMAND realsense_edge_effects_test)
+
     # Scan timestamps across the range sensors + their PDU headers.
     # Needs the PDU type headers (it asserts on the converted messages).
     if(EXISTS "${HAKO_PDU_TYPES_INCLUDE_DIR}/builtin_interfaces")

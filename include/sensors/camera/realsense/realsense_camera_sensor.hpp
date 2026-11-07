@@ -8,6 +8,8 @@
 // Pipeline per capture:
 //   render (MuJoCo)
 //   -> rolling-shutter distortion  (rolling streams only, needs SetMotionSource)
+//   -> depth-edge effects          (realsense_edge_effects.hpp, optional: occlusion
+//                                   shadow + flying pixels)
 //   -> stereo depth model          (realsense_depth_model.hpp)
 //   -> post-processing             (librealsense-style filters, optional)
 //
@@ -63,6 +65,9 @@ namespace hako::robots::sensor::camera::realsense
         const CameraConfig& GetRgbCameraConfig() const { return rgb_config_; }
         const DepthCameraConfig& GetDepthCameraConfig() const { return depth_config_; }
         const DepthModelParams& GetDepthModelParams() const { return depth_params_; }
+        const EdgeEffectsParams& GetEdgeEffectsParams() const { return edge_params_; }
+        // Counts of the last depth capture (zero when edge effects are off).
+        const EdgeEffectsStats& GetLastEdgeEffectsStats() const { return last_edge_stats_; }
         bool HasRgb() const { return config_.RgbEnabled(); }
 
         // RGB is cleared when the model has no RGB or the stream is disabled.
@@ -87,8 +92,11 @@ namespace hako::robots::sensor::camera::realsense
         DepthCameraConfig depth_render_config_ {};  // render resolution
         DepthCameraConfig depth_config_ {};         // output (after decimation)
         DepthModelParams depth_params_ {};
+        EdgeEffectsParams edge_params_ {};
+        EdgeEffectsStats last_edge_stats_ {};
         DepthPostProcessor post_ {};
         std::mt19937 depth_rng_;
+        std::mt19937 edge_rng_;   // separate stream: enabling edges keeps the depth noise sequence
         std::mt19937 rgb_noise_rng_;
     };
 }

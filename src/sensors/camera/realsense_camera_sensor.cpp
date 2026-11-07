@@ -80,6 +80,8 @@ bool RealSenseCameraSensor::LoadConfig(const RealSenseConfig& config)
     config_ = config;
     const auto& p = config_.profile;
     depth_params_ = MakeDepthModelParams(config_);
+    edge_params_ = MakeEdgeEffectsParams(config_, depth_params_);
+    last_edge_stats_ = EdgeEffectsStats {};
 
     // Render config. The clip keeps a margin on both sides so the depth model
     // (not the GL clip) decides the invalid range: background beyond the far
@@ -121,6 +123,7 @@ bool RealSenseCameraSensor::LoadConfig(const RealSenseConfig& config)
     }
 
     depth_rng_.seed(config_.depth_model.seed);
+    edge_rng_.seed(config_.edge_effects.seed);
     rgb_noise_rng_.seed(config_.rgb_noise.seed);
     post_.Reset();
     StartScheduler(config_.depth.fps);
@@ -199,13 +202,18 @@ bool RealSenseCameraSensor::RenderDepth(DepthFrame& depth_out, ImageFrame* rgb_o
         ClearDepthFrame(depth_out);
     } else {
         if (rgb_out) ideal_depth = depth_out.data;
-        // 1. rolling shutter (exposure) -> 2. stereo matching -> 3. SDK filters
+        // 1. rolling shutter (exposure) -> 2. edge effects -> 3. stereo matching -> 4. SDK filters
         const double readout = config_.DepthReadoutS();
         if (config_.rolling_shutter.enabled && readout > 0.0) {
             ApplyRollingShutterDepth(depth_out.data, depth_out.width, depth_out.height,
                                      IntrinsicsOf(depth_out.width, depth_out.height,
                                                   depth_render_config_.horizontal_fov),
                                      motion, readout);
+        }
+        last_edge_stats_ = EdgeEffectsStats {};
+        if (edge_params_.occlusion || edge_params_.flying_pixels) {
+            last_edge_stats_ = ApplyEdgeEffects(depth_out.data, depth_out.width, depth_out.height,
+                                                edge_params_, edge_rng_);
         }
         ApplyDepthModel(depth_out.data, depth_out.width, depth_out.height,
                         depth_params_, depth_rng_, &raw.material_ids);

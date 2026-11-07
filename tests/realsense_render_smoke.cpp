@@ -10,7 +10,10 @@
 //   - decimation changes the output size and the derived DepthCameraConfig,
 //   - rolling shutter (D415) skews the pole while the rig yaws,
 //   - the IMU reads gravity and the yaw rate in the optical frame,
-//   - the generic DepthCameraSensor still works next to it (existing API).
+//   - the generic DepthCameraSensor still works next to it (existing API),
+//   - RS-1: a box at 0.6 m in front of a wall at 1.0 m (camera looking -x) casts an
+//     occlusion shadow of fx*B*(1/0.6 - 1/1.0) px on its left and gets flying
+//     pixels on its edges; with edge effects off the output is bit-identical.
 
 #include <algorithm>
 #include <cmath>
@@ -25,6 +28,7 @@
 #include "sensors/camera/camera_sensor.hpp"
 #include "sensors/camera/mujoco_camera_renderer.hpp"
 #include "sensors/camera/realsense/realsense_camera_sensor.hpp"
+#include "sensors/camera/realsense/realsense_depth_metrics.hpp"
 #include "sensors/camera/realsense/realsense_imu_sensor.hpp"
 
 namespace cam = hako::robots::sensor::camera;
@@ -49,6 +53,9 @@ const char* kScene = R"(
     </body>
     <geom name="wall" type="box" pos="2.05 0 1" size="0.05 20 20" material="wall_mat"/>
     <geom name="pole" type="box" pos="1.9 -1.0 1" size="0.02 0.02 10" material="pole_mat"/>
+    <camera name="rs_edge" pos="0 0 1" xyaxes="0 1 0 0 0 1"/>
+    <geom name="rear_wall" type="box" pos="-1.05 0 1" size="0.05 20 20" material="wall_mat"/>
+    <geom name="edge_box" type="box" pos="-0.65 0 1" size="0.05 0.1 0.1" material="pole_mat"/>
   </worldbody>
 </mujoco>
 )";
@@ -336,6 +343,112 @@ int main()
         rs::MakeDefaultConfig("D415", d415);
         rs::RealSenseImuSensor none(world, "rs_depth");
         check(none.LoadConfig(d415) && !none.Enabled(), "D415 has no IMU");
+    }
+
+    std::printf("[RS-1 D435 edge effects: box at 0.6 m, wall at 1.0 m]\n");
+    {
+        const int row = 240;
+        const auto at = [](const cam::DepthFrame& f, int y, int x) {
+            return f.data[static_cast<std::size_t>(y) * f.width + x];
+        };
+        const auto box_left = [&](const cam::DepthFrame& f) {
+            for (int x = 0; x < f.width; ++x) {
+                const float v = at(f, row, x);
+                if (std::isfinite(v) && v < 0.8F) return x;
+            }
+            return -1;
+        };
+        const auto box_right = [&](const cam::DepthFrame& f) {
+            for (int x = f.width - 1; x >= 0; --x) {
+                const float v = at(f, row, x);
+                if (std::isfinite(v) && v < 0.8F) return x;
+            }
+            return -1;
+        };
+
+        rs::RealSenseConfig c {};
+        rs::MakeDefaultConfig("D435", c);
+        c.depth_model.enabled = false;   // isolate the geometry
+        c.edge_effects.enabled = true;
+        c.edge_effects.flying_pixels.enabled = false;
+        rs::RealSenseCameraSensor sensor(renderer, "rs_edge");
+        check(sensor.LoadConfig(c), "LoadConfig (occlusion only)");
+        cam::DepthFrame depth;
+        sensor.CaptureDepth(depth);
+        const int xl = box_left(depth);
+        const int xr = box_right(depth);
+        int shadow = 0;
+        for (int x = xl - 1; x >= 0 && !std::isfinite(at(depth, row, x)); --x) ++shadow;
+        const auto& m = sensor.GetDepthModelParams();
+        const double want = rs::OcclusionShadowPx(m.fx_px, m.baseline_m, 0.6, 1.0);
+        std::printf("  box columns %d..%d, shadow %d px\n", xl, xr, shadow);
+        check(xl > 0 && xr > xl, "box found");
+        close_to(shadow, want, 1.5, "occlusion shadow = fx*B*(1/0.6 - 1/1.0)");
+        bool right_ok = true;
+        for (int x = xr + 1; x < depth.width; ++x) right_ok = right_ok && std::isfinite(at(depth, row, x));
+        check(right_ok, "no shadow right of the box");
+        check(sensor.GetLastEdgeEffectsStats().occluded > 0, "stats report occluded pixels");
+
+        c.edge_effects.flying_pixels.enabled = true;
+        c.edge_effects.flying_pixels.probability = 1.0;
+        check(sensor.LoadConfig(c), "LoadConfig (occlusion + flying)");
+        sensor.CaptureDepth(depth);
+        const int r = sensor.GetEdgeEffectsParams().window_radius_px;
+        int flying = 0;
+        bool near_edges = true;
+        for (int x = 0; x < depth.width; ++x) {
+            const float v = at(depth, row, x);
+            if (!std::isfinite(v) || v <= 0.62F || v >= 0.98F) continue;
+            ++flying;
+            near_edges = near_edges && (std::abs(x - xl) <= r + 1 || std::abs(x - xr) <= r + 1);
+        }
+        std::printf("  flying pixels in row %d: %d (r = %d)\n", row, flying, r);
+        check(flying > 0, "flying pixels appear on the box edges");
+        check(near_edges, "flying pixels only within r of the edges");
+
+        // Edge effects off: bit-identical to a config without them (other params changed).
+        rs::RealSenseConfig a {};
+        rs::MakeDefaultConfig("D435", a);
+        a.depth_model.seed = 5;
+        rs::RealSenseConfig b = a;
+        b.edge_effects.enabled = false;
+        b.edge_effects.flying_pixels.probability = 0.9;
+        b.edge_effects.seed = 77;
+        rs::RealSenseCameraSensor sa(renderer, "rs_edge");
+        rs::RealSenseCameraSensor sb(renderer, "rs_edge");
+        check(sa.LoadConfig(a) && sb.LoadConfig(b), "LoadConfig (regression pair)");
+        cam::DepthFrame da;
+        cam::DepthFrame db;
+        sa.CaptureDepth(da);
+        sb.CaptureDepth(db);
+        bool same = da.data.size() == db.data.size();
+        for (std::size_t i = 0; same && i < da.data.size(); ++i) {
+            same = (std::isnan(da.data[i]) && std::isnan(db.data[i])) || da.data[i] == db.data[i];
+        }
+        check(same, "edge effects off -> bit-identical depth");
+
+        // Metrics of the full chain (typical noise + edges) against the ideal depth.
+        rs::RealSenseConfig ideal_c {};
+        rs::MakeDefaultConfig("D435", ideal_c);
+        ideal_c.depth_model.enabled = false;
+        rs::RealSenseCameraSensor ideal(renderer, "rs_edge");
+        check(ideal.LoadConfig(ideal_c), "LoadConfig (ideal)");
+        cam::DepthFrame truth;
+        ideal.CaptureDepth(truth);
+        rs::RealSenseConfig full = a;
+        full.edge_effects.enabled = true;
+        rs::RealSenseCameraSensor sf(renderer, "rs_edge");
+        check(sf.LoadConfig(full), "LoadConfig (full)");
+        cam::DepthFrame df;
+        sf.CaptureDepth(df);
+        const auto mb = rs::ComputeDepthMetrics(truth.data, da.data, sa.GetDepthModelParams());
+        const auto mf = rs::ComputeDepthMetrics(truth.data, df.data, sf.GetDepthModelParams());
+        std::printf("  metrics without edges: missing %.4f outlier %.5f rms %.2f mm\n",
+                    mb.missing_rate, mb.outlier_rate, mb.rms_m * 1e3);
+        std::printf("  metrics with edges   : missing %.4f outlier %.5f rms %.2f mm\n",
+                    mf.missing_rate, mf.outlier_rate, mf.rms_m * 1e3);
+        check(mf.missing_rate > mb.missing_rate && mf.outlier_rate > mb.outlier_rate,
+              "edges add missing pixels and outliers");
     }
 
     std::printf("realsense_render_smoke: %d/%d checks passed\n", g_checks - g_failures, g_checks);

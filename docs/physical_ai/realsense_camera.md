@@ -13,6 +13,8 @@ MuJoCo 描画の上に**機種プロファイル＋ステレオ深度誤差モ�
 | `include/sensors/camera/realsense/realsense_profile.hpp` | 機種表（14 機種、IMU 仕様を含む） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_depth_model.hpp` | ステレオ深度誤差モデル | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_rolling_shutter.hpp` | ローリングシャッター歪み | なし（純粋） |
+| `include/sensors/camera/realsense/realsense_edge_effects.hpp` | 深度の境界：隠れ領域（影）と飛び点（RS-1、既定 OFF） | なし（純粋） |
+| `include/sensors/camera/realsense/realsense_depth_metrics.hpp` | 真値との比較（欠損率・外れ値率・RMS） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_post_processing.hpp` | 後処理フィルター（間引き・閾値・空間・時間・穴埋め） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_imu_model.hpp` | IMU 誤差モデル（BMI055 / BMI085） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_config.hpp` | 設定構造体と JSON 読み込み・検証 | nlohmann のみ |
@@ -21,6 +23,7 @@ MuJoCo 描画の上に**機種プロファイル＋ステレオ深度誤差モ�
 | `config/realsense/*.json` | 設定サンプル（D435i / D455 / D405 / D421 / D555 / D415） | |
 | `tests/realsense_depth_model_test.cpp` | 機種表・深度誤差・JSON の単体テスト | 常にビルド |
 | `tests/realsense_effects_test.cpp` | 後処理・ローリングシャッター・IMU 誤差の単体テスト | 常にビルド |
+| `tests/realsense_edge_effects_test.cpp` | 隠れ領域・飛び点・評価指標の単体テスト | 常にビルド |
 | `tests/realsense_render_smoke.cpp` | 実描画のスモークテスト（壁・ポール・回転台） | カメラ ON + libmujoco + OpenGL |
 
 ## 情報源
@@ -98,6 +101,35 @@ D585 Pro は発表段階で `preliminary`（読み込み時に警告）。subpix
   設定しないと効果なし。テスト用に `SetCameraMotion()` で固定値も渡せる。
 - 回転中は画面端の行が描画範囲の外を見に行くので、その画素は無効（深度 NaN、画像 0）。
 - 読み出し時間は `rolling_shutter.depth_readout_s` / `rgb_readout_s` で変更できる。
+
+## 深度の境界：隠れ領域と飛び点（`edge_effects`、既定 OFF）
+
+ローリングシャッターの後、ステレオ深度誤差の前にかける（描画した深度の幾何で決まるため）。
+乱数は深度誤差と別の系列（`edge_effects.seed`）なので、入れても深度ノイズの系列は変わらない。
+`enabled: false` では出力が入れる前とビット一致する。
+
+1. **隠れ領域（影）**: 深度は左イメージャ基準。列 x の点は右画像で x − d(x)（d = fx·B/z）に写る。
+   右側の画素がすでに同じかより左に写っていれば、右イメージャからは手前の面に隠れて見えない → 無効。
+   手前の物体の**左側**に幅 fx·B·(1/z_手前 − 1/z_奥) px の影ができる（D435 848 px で 0.6 m の箱と 1.0 m の壁なら約 15 px）。
+   乱数を使わない幾何の判定。
+2. **飛び点**: 隣り合う画素の深度差が `jump_ratio` × 近いほうの深度を超える所を段差とし、
+   (2r+1)×(2r+1) の照合窓に段差を含む画素を、確率 `probability` で窓内の最も近い深度と最も遠い深度の間の一様乱数にする。
+   段差のない急な斜面は対象にならない。範囲外（最大距離より遠い）の深度は混ぜない。
+   r は解像度に比例（`window_px` は 848 px 基準。848 px で r = 4、424 px で r = 2）。
+
+| 設定 | 既定 | 種類 |
+|---|---|---|
+| `occlusion` | true | 幾何（仮定なし） |
+| `flying_pixels.window_px` | 7（848 px 基準） | **仮定値**（D4 の照合窓の大きさは非公開） |
+| `flying_pixels.jump_ratio` | 0.05 | **仮定値** |
+| `flying_pixels.probability` | 0.5 | **仮定値** |
+
+処理時間は 848×480 で約 8 ms（MSVC Release、この PC）。段差の検出は積分画像で O(N)、窓の最小・最大は段差の近くだけ計算する。
+
+評価の道具 `ComputeDepthMetrics(truth, measured, params)` は、真値（描画値）に対する欠損率、
+外れ値率（|誤差| > 3σz、下限 2 mm）、外れ値を除いた RMS を返す。
+実描画（0.6 m の箱と 1.0 m の壁、D435 typical）では、境界の効果で欠損率 2.71% → 3.22%、外れ値率 0.35% → 0.83%。
+単体テストの合成画像では、後処理の空間フィルターで飛び点の外れ値率が 1.03% → 0.66% に減る（消えはしない）。
 
 ## 後処理フィルター（librealsense 相当、既定 OFF）
 
@@ -181,13 +213,13 @@ if (cam.ShouldUpdate(dt)) {
 ## モデルに入れていないもの
 
 IR プロジェクタのパターンとテクスチャの有無による欠損（塗りつぶしの無い面での穴）、
-深度の境界の飛び点（flying pixels）、マルチパス、温度ドリフト、露光・ゲイン、モーションブラー、
-IMU とカメラ間の時刻ずれ。
+マルチパス、温度ドリフト、露光・ゲイン、モーションブラー、IMU とカメラ間の時刻ずれ。
+（深度の境界の飛び点と隠れ領域は `edge_effects` で入れた。）
 
 ## テスト
 
 ```bash
-ctest --test-dir build -R "realsense_(depth_model|effects)_test" --output-on-failure
+ctest --test-dir build -R "realsense_(depth_model|effects|edge_effects)_test" --output-on-failure
 # 実描画（-DHAKO_SENSOR_BUILD_CAMERA=ON と MUJOCO_LIBRARY が必要）
 ctest --test-dir build -R realsense_render_smoke --output-on-failure
 ```
@@ -197,3 +229,7 @@ ctest --test-dir build -R realsense_render_smoke --output-on-failure
 D435i 848 px・2 m の壁で RMS 1.432 cm（式の値 1.432 cm）、左の無効帯 12 px（11.2 px）、
 D415 を 5 rad/s で回転させたときのポールの位置 735.5 / 814.5 px（式の値 735.2 / 814.7 px）、
 IMU のジャイロ真値 −5.000 rad/s・加速度真値 −9.81 m/s²（光学座標の y）。
+
+2026-11-07（RS-1 追加後）: 単体テスト 3 本（132／58／37）、実描画 54/54 すべて合格。
+主な実測: 0.6 m の箱の左の影 14 px（式の値 14.9 px）、合成画像の影 22 px（22.3 px）・52 px（52.1 px）、
+飛び点は箱の縁から r 以内にだけ出る。
