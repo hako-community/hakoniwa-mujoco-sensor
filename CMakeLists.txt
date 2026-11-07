@@ -101,16 +101,15 @@ endif()
 
 # nlohmann/json の場所。-DNLOHMANN_JSON_INCLUDE_DIR で明示指定するのが基本で、
 # 未指定のときだけ下の順で探す。
-#   1) ★★★★ このリポジトリが自分で持つもの（submodule。setup.sh が同期する）
-#   2) 親リポの third_party/ に submodule として並んでいる場合（hakoniwa-humanoid の構成）
-#   3) システムに入っている場合（Debian/Ubuntu の nlohmann-json3-dev など）
+#   1) ★★★★ hakoniwa-mujoco-runtime に同梱のもの（v3.12.0。2026-11-07 から。sensor は自分では持たない。
+#      版を決める場所は runtime 1 つ）
+#   2) システムに入っている場合（Debian/Ubuntu の nlohmann-json3-dev など）
 # ★★★ 2026-09-02: 先頭にあった `../nlohmann-json/single_include` を外した。
 #   実体は **hakoniwa-drone-pro/thirdparty/nolman**（PRIVATE。しかも「使わない」と
 #   決めたリポジトリ）への symlink で、**版が記録に残らず、単体では configure も通らなかった**。
 if(NOT NLOHMANN_JSON_INCLUDE_DIR)
     foreach(_cand
-        "${CMAKE_CURRENT_SOURCE_DIR}/external_library/nolman/single_include"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/nlohmann-json/single_include"
+        "${HAKO_MUJOCO_RUNTIME_DIR}/external_library/nlohmann-json/single_include"
         "/usr/local/include"
         "/usr/include")
         if(EXISTS "${_cand}/nlohmann/json.hpp")

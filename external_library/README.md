@@ -15,7 +15,7 @@ configure のときに**リポジトリの外を探しに行っていた**。
 
 | 取り込む | 形 | 版 |
 |---|---|---|
-| `nolman`（nlohmann/json） | **git submodule** | `663058e7d`（★ 4 リポジトリで同一に揃えてある） |
+| nlohmann/json | **このリポジトリでは持たない**。兄弟フォルダの `hakoniwa-mujoco-runtime/external_library/nlohmann-json`（v3.12.0 を同梱）を使う | 版は runtime が決める（2026-11-07 に submodule をやめた。clone を速くするため） |
 | `mujoco` | **`mujoco.lock`（版 ＋ SHA256）で取得** | 3.9.0 |
 
 ## ★★★★ なぜ MuJoCo だけ submodule にしないのか
@@ -34,7 +34,7 @@ submodule で取れるのは**ソース**で、`libmujoco.so` は付いてこな
 external_library/setup.sh
 ```
 
-submodule を同期し、MuJoCo を lock の版で取得して SHA256 を検証する。
+runtime に同梱の nlohmann/json があるかを確かめ、MuJoCo を lock の版で取得して SHA256 を検証する。
 ★ 最後に **symlink が他リポジトリを指していないこと**を断言して終わる（指していたら異常終了する）。
 
 ## ★★★ 版を上げるときは 4 リポジトリ同時に

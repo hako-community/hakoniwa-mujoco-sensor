@@ -11,7 +11,7 @@
 #                   （drone-pro は PRIVATE で、しかも「使わない」と決めたリポジトリ）
 #   ★★★ **このリポジトリは単体でビルドできなければ意味がない。**
 #
-#   * nlohmann/json は **git submodule**（版が git に残る）
+#   * nlohmann/json は **hakoniwa-mujoco-runtime に同梱のもの**を使う（2026-11-07 に submodule をやめた）
 #   * MuJoCo は **バイナリ**なので `mujoco.lock` の版と SHA256 で固定して取得する
 set -euo pipefail
 
@@ -20,12 +20,10 @@ ROOT="$(cd "${HERE}/.." && pwd)"
 
 echo "=== external_library の用意 ==="
 
-# --- 1. submodule（nolman = nlohmann/json）---
-if [[ -d "${ROOT}/.git" ]]; then
-    echo "  [submodule] nolman を同期する"
-    git -C "${ROOT}" submodule update --init --recursive external_library/nolman
-else
-    echo "  [WARN] git 管理下ではないので submodule を同期できない" >&2
+# --- 1. nlohmann/json（兄弟の hakoniwa-mujoco-runtime に同梱。取得は不要）---
+RT_JSON="${ROOT}/../hakoniwa-mujoco-runtime/external_library/nlohmann-json/single_include/nlohmann/json.hpp"
+if [[ ! -f "${RT_JSON}" ]]; then
+    echo "  [WARN] ${RT_JSON} が無い（兄弟フォルダに hakoniwa-mujoco-runtime を置く）" >&2
 fi
 
 # --- 2. MuJoCo（バイナリリリース。版と SHA256 を lock で固定）---
@@ -112,7 +110,7 @@ fi
 
 echo
 echo "=== 確認 ==="
-for d in nolman mujoco; do
+for d in mujoco; do
     printf "  %-24s %s\n" "${d}" "$([[ -e "${HERE}/${d}" ]] && echo あり || echo '(無し)')"
 done
 grep -m1 mjVERSION_HEADER "${HERE}/mujoco/include/mujoco/mujoco.h" | sed 's/^/  MuJoCo /'

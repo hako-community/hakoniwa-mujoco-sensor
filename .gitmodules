@@ -1,3 +1,0 @@
-[submodule "external_library/nolman"]
-	path = external_library/nolman
-	url = https://github.com/nlohmann/json.git

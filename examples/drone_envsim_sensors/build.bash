@@ -102,7 +102,8 @@ echo "built: $OUT_PDU3D"
 #   1) 親リポの third_party/ に submodule として並んでいる場合（hakoniwa-humanoid の構成）
 #   2) システムに入っている場合（nlohmann-json3-dev など）
 find_nlohmann() {
-    for c in "$REPO/../nlohmann-json/single_include" \
+    for c in "$REPO/../hakoniwa-mujoco-runtime/external_library/nlohmann-json/single_include" \
+             "$REPO/../nlohmann-json/single_include" \
              "$REPO/../../third_party/nlohmann-json/single_include" \
              "/usr/local/include" "/usr/include"; do
         if [ -f "$c/nlohmann/json.hpp" ]; then echo "$c"; return 0; fi
