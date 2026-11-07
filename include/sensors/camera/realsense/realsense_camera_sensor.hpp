@@ -97,6 +97,11 @@ namespace hako::robots::sensor::camera::realsense
         const ExposureDecision& GetLastDepthExposure() const { return last_depth_exposure_; }
         const ExposureDecision& GetLastRgbExposure() const { return last_rgb_exposure_; }
         const BlurStats& GetLastBlurStats() const { return last_blur_stats_; }
+
+        // RS-6 frame timing (frame_timing.enabled): the last Capture was dropped
+        // (frames cleared) and the number of dropped frames.
+        bool LastFrameDropped() const { return last_frame_dropped_; }
+        std::size_t DroppedFrames() const { return dropped_frames_; }
         // IR material per MuJoCo material id (resolved at the first capture).
         const std::vector<IrMaterial>& GetResolvedMaterials() const { return materials_by_id_; }
         bool HasRgb() const { return config_.RgbEnabled(); }
@@ -148,6 +153,10 @@ namespace hako::robots::sensor::camera::realsense
         ExposureDecision last_rgb_exposure_ {};
         BlurStats last_blur_stats_ {};
         std::mt19937 exposure_rng_;
+        FrameTimingModel frame_timing_ {};
+        bool last_frame_dropped_ {false};
+        std::size_t dropped_frames_ {0};
+        void ApplyFrameTiming(DepthFrame& depth, ImageFrame* rgb);
         std::mt19937 rgb_noise_rng_;
     };
 }

@@ -27,7 +27,10 @@
 //   - RS-5: the box scene with the camera yawing at 3 rad/s: depth loses a band of
 //     ~(N-1)/N * w*t*fx px at each box edge (wider for a longer exposure), the RGB
 //     edges smear, auto exposure lengthens the exposure / raises the gain in a dark
-//     scene, and exposure off is bit-identical (depth and RGB).
+//     scene, and exposure off is bit-identical (depth and RGB),
+//   - RS-6: on the rig yawing at 5 rad/s an IMU chip 5 cm off the axis reads the
+//     centripetal -w^2 r, IMU stamps carry the time offset, misalignment tilts
+//     gravity, and camera frames can be dropped / jittered.
 
 #include <algorithm>
 #include <chrono>
@@ -835,6 +838,75 @@ int main()
             same = (std::isnan(dp.data[i]) && std::isnan(dof.data[i])) || dp.data[i] == dof.data[i];
         }
         check(same, "exposure off -> bit-identical depth and RGB");
+    }
+
+    std::printf("[RS-6 D435i IMU timing / lever arm / misalignment, frame timing]\n");
+    {
+        mjData* d = world->getData();
+        d->time = 0.0;
+        SetYawRate(*world, 5.0);
+        rs::RealSenseConfig c {};
+        rs::MakeDefaultConfig("D435i", c);
+        c.imu.bias_mode = "none";
+        c.imu.noise_scale = 0.0;
+        c.imu.quantize = false;
+        c.imu.saturate = false;
+        c.imu_timing.enabled = true;
+        c.imu_timing.params.position_m[0] = 0.05;   // 5 cm to the right of the depth origin
+        c.imu_timing.params.time_offset_s = 0.003;
+        rs::RealSenseImuSensor imu(world, "rs_depth");
+        check(imu.LoadConfig(c), "IMU LoadConfig (timing)");
+        std::vector<rs::MotionSample> accel;
+        std::vector<rs::MotionSample> gyro;
+        imu.Update(0.0101, accel, gyro);
+        check(!accel.empty() && !gyro.empty(), "samples");
+        std::printf("  accel at the chip: (%.4f %.4f %.4f), gyro y %.4f\n", accel.back().value.x, accel.back().value.y,
+                    accel.back().value.z, gyro.back().value.y);
+        close_to(accel.back().value.x, -25.0 * 0.05, 1e-6, "lever arm: centripetal -w^2 r = -1.25 m/s^2");
+        close_to(gyro.back().value.y, -5.0, 1e-9, "gyro unchanged by the lever arm");
+        close_to(gyro.back().timestamp, 0.0 - 0.0001 + 0.003, 0.0026, "stamps carry the +3 ms offset");
+        check(gyro.back().timestamp > 0.0, "offset stamp after the sample time");
+
+        c.imu_timing.params.position_m[0] = 0.0;
+        c.imu_timing.params.misalignment_deg = 1.0;
+        c.imu_timing.params.seed = 2;
+        SetYawRate(*world, 0.0);
+        rs::RealSenseImuSensor tilt(world, "rs_depth");
+        check(tilt.LoadConfig(c), "IMU LoadConfig (misalignment)");
+        accel.clear();
+        gyro.clear();
+        tilt.Update(0.0101, accel, gyro);
+        const auto& g = accel.back().value;
+        const double horiz = std::sqrt(g.x * g.x + g.z * g.z);
+        const double ang = std::atan2(horiz, -g.y);
+        std::printf("  misaligned gravity: (%.4f %.4f %.4f), tilt %.3f deg (rotation %.3f deg)\n", g.x, g.y, g.z,
+                    ang / rs::kDegToRad, tilt.GetTimingModel().MisalignmentAngleRad() / rs::kDegToRad);
+        check(ang > 0.0 && ang <= tilt.GetTimingModel().MisalignmentAngleRad() + 1e-9,
+              "gravity tilts by at most the misalignment angle");
+
+        // camera frames
+        rs::RealSenseConfig fc {};
+        rs::MakeDefaultConfig("D435", fc);
+        fc.frame_timing.enabled = true;
+        fc.frame_timing.params.drop_probability = 1.0;
+        rs::RealSenseCameraSensor drop(renderer, "rs_depth");
+        check(drop.LoadConfig(fc), "LoadConfig (frame drop)");
+        cam::DepthFrame df;
+        cam::ImageFrame rf;
+        drop.Capture(rf, df);
+        check(drop.LastFrameDropped() && df.data.empty() && rf.data.empty() && drop.DroppedFrames() == 1,
+              "dropped frame: depth and RGB cleared");
+        fc.frame_timing.params.drop_probability = 0.0;
+        fc.frame_timing.params.jitter_s = 0.002;
+        d->time = 1.0;
+        rs::RealSenseCameraSensor jit(renderer, "rs_depth");
+        check(jit.LoadConfig(fc), "LoadConfig (frame jitter)");
+        jit.Capture(rf, df);
+        std::printf("  jittered frame stamp: depth %.5f, rgb %.5f (sim 1.0)\n", df.timestamp, rf.timestamp);
+        check(!jit.LastFrameDropped() && df.timestamp != 1.0 && std::fabs(df.timestamp - 1.0) < 0.012
+                  && rf.timestamp == df.timestamp,
+              "frame stamp jittered, depth and RGB share it");
+        d->time = 0.0;
     }
 
     std::printf("realsense_render_smoke: %d/%d checks passed\n", g_checks - g_failures, g_checks);

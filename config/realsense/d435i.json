@@ -82,6 +82,16 @@
     "motion_blur": { "enabled": true, "subframes": 4, "disparity_spread_px": 1.0 },
     "seed": 29
   },
+  "imu_timing": {
+    "enabled": false,
+    "time_offset_s": 0.0,
+    "jitter_s": 0.0,
+    "drop_probability": 0.0,
+    "position_m": [0.0, 0.0, 0.0],
+    "misalignment_deg": 0.0,
+    "seed": 31
+  },
+  "frame_timing": { "enabled": false, "jitter_s": 0.0, "drop_probability": 0.0, "seed": 37 },
   "post_processing": {
     "enabled": false,
     "disparity_domain": true,

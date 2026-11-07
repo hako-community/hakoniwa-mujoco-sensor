@@ -20,6 +20,7 @@ MuJoCo 描画の上に**機種プロファイル＋ステレオ深度誤差モ�
 | `include/sensors/camera/realsense/realsense_specular_model.hpp` | 光沢面の白飛びと相互反射の鏡像（RS-3、既定 OFF） | なし（光線は外から渡す） |
 | `include/sensors/camera/realsense/realsense_thermal_model.hpp` | 温度ドリフト：暖機・外気温・自己校正、深度と IMU（RS-4、既定 OFF） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_exposure_model.hpp` | 露光・ゲイン（自動／手動）とモーションブラー（RS-5、既定 OFF） | なし（純粋） |
+| `include/sensors/camera/realsense/realsense_imu_timing.hpp` | IMU の時刻ずれ・揺らぎ・欠落・取り付け位置と角度、フレームの揺らぎ・欠落（RS-6、既定 OFF） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_post_processing.hpp` | 後処理フィルター（間引き・閾値・空間・時間・穴埋め） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_imu_model.hpp` | IMU 誤差モデル（BMI055 / BMI085） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_config.hpp` | 設定構造体と JSON 読み込み・検証 | nlohmann のみ |
@@ -33,6 +34,7 @@ MuJoCo 描画の上に**機種プロファイル＋ステレオ深度誤差モ�
 | `tests/realsense_specular_model_test.cpp` | 白飛び・鏡像の単体テスト（解析的な光線で代用） | 常にビルド |
 | `tests/realsense_thermal_model_test.cpp` | 温度・視差のずれ・自己校正・IMU のゼロ点の単体テスト | 常にビルド |
 | `tests/realsense_exposure_model_test.cpp` | 自動露光・ゲイン雑音・明るさ・ブラーの単体テスト | 常にビルド |
+| `tests/realsense_imu_timing_test.cpp` | 取り付け位置・角度、時刻の揺らぎ・欠落の単体テスト | 常にビルド |
 | `tests/realsense_render_smoke.cpp` | 実描画のスモークテスト（壁・ポール・回転台） | カメラ ON + libmujoco + OpenGL |
 
 ## 情報源
@@ -354,7 +356,25 @@ delta の単位は、視差領域では 1/32 px（D4 のサブピクセル単位
   ジャイロと加速度をまとめた `ImuFrame` を返すので、既存の `sensor_msgs/Imu` 変換に渡せる
   （姿勢は出さないので単位四元数）。物理の刻み幅はジャイロ周期以下にすること。
 - チップは既定 BMI055。新しい個体（BMI085）は `overrides.imu` で `chip` と `accel_bits: 16` を指定する。
-- IMU チップとカメラ原点の位置ずれ（数 cm）は無視している。
+- IMU チップとカメラ原点の位置ずれ（数 cm）は、既定では無視する（`imu_timing.position_m` で入れられる。次の節）。
+
+### IMU とフレームの時刻・取り付け（`imu_timing`／`frame_timing`、既定 OFF）
+
+VIO・SLAM は IMU とカメラの時刻関係に敏感なので、それを崩す要素を入れられるようにした。
+
+| 項目 | 内容 |
+|---|---|
+| 時刻ずれ `time_offset_s` | IMU のタイムスタンプに一定のずれを足す |
+| 揺らぎ `jitter_s` | IMU のタイムスタンプに N(0, σ)。ストリームごとに単調増加を保つ |
+| 欠落 `drop_probability` | IMU のサンプルが確率で抜ける（`DroppedAccel()`／`DroppedGyro()` で数を取れる） |
+| 取り付け位置 `position_m` | チップの位置 r（深度の光学座標、深度原点から）。加速度に α×r + ω×(ω×r) を足す。ジャイロは剛体のどこでも同じ |
+| 取り付け角度 `misalignment_deg` | 各軸 N(0, σ) の小さな回転を起動ごとに決め、加速度・ジャイロに掛ける |
+| フレームの揺らぎ `frame_timing.jitter_s` | 深度と RGB のタイムスタンプに同じずれを足す（単調増加を保つ） |
+| フレームの欠落 `frame_timing.drop_probability` | `Capture` の結果を空にする（`LastFrameDropped()`／`DroppedFrames()`） |
+
+試すときの目安（**仮定値**）: 揺らぎはハードウェアのタイムスタンプで 0.1 ms、PC の時刻で 1 ms、取り付け角度 0.5°。
+取り付け位置は実機の値を `rs-enumerate-devices -c` の深度 → IMU の外部パラメータで確かめて入れる（機種表には持っていない）。
+処理の順は、取り付け位置 → 取り付け角度 → 温度のゼロ点 → 雑音・量子化。
 
 ## 設定（JSON）
 
@@ -403,15 +423,16 @@ if (cam.ShouldUpdate(dt)) {
 
 ## モデルに入れていないもの
 
-IMU とカメラ間の時刻ずれ（RS-6 で予定）、動いている物体のブラー。
-温度ドリフトは `thermal`、露光・ゲインとカメラの動きによるブラーは `exposure` で入れた。
+動いている物体のブラー。
+温度ドリフトは `thermal`、露光・ゲインとカメラの動きによるブラーは `exposure`、
+IMU とカメラの時刻・取り付けは `imu_timing`／`frame_timing` で入れた。
 （深度の境界の飛び点と隠れ領域は `edge_effects`、模様の見えない所の穴は `texture_model`、
 光沢面の白飛びと相互反射は `specular_model` で入れた。ToF 型のマルチパスは扱わない。）
 
 ## テスト
 
 ```bash
-ctest --test-dir build -R "realsense_(depth_model|effects|edge_effects|texture_model|specular_model|thermal_model|exposure_model)_test" --output-on-failure
+ctest --test-dir build -R "realsense_(depth_model|effects|edge_effects|texture_model|specular_model|thermal_model|exposure_model|imu_timing)_test" --output-on-failure
 # 実描画（-DHAKO_SENSOR_BUILD_CAMERA=ON と MUJOCO_LIBRARY が必要）
 ctest --test-dir build -R realsense_render_smoke --output-on-failure
 ```
@@ -451,3 +472,8 @@ IMU のジャイロ真値 −5.000 rad/s・加速度真値 −9.81 m/s²（光�
 10 ms で 20 px（式 20.1 px）。RGB（1280×720）の中央の行の中間調の画素 静止 2 → 回転 67。
 暗い RGB（明るさ 0.2）の自動露光は 33.3 ms・ゲイン 24.0、深度は箱が近く明るいので 8.11 ms。
 深度のブラー（848×480、4 枚）は 70.6 ms／フレーム（CPU が混んでいる状態。飛び点・影が 17 ms に出る条件）。
+
+2026-11-07（RS-6 追加後）: 単体テスト 8 本（132／58／37／47／30／36／41／21）、実描画 114/114 すべて合格。
+主な実測（D435i、5 rad/s で回る台）: 軸から 5 cm のチップの加速度 x = −1.2500 m/s²（−ω²r）、ジャイロは −5.0000 rad/s のまま。
+取り付け角度 1°（σ）の個体で重力が 0.807° 傾く（回転角 0.807°）。フレームの揺らぎ 2 ms で時刻 1.00061 s（深度と RGB で同じ）。
+実描画のテストは `main` に多数のセンサを置くので、MSVC ではスタックを 16 MB にしている（ライブラリ側の変更ではない）。

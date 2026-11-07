@@ -34,6 +34,9 @@
 //                 "rgb_light_level": 1.0, "rgb_gain_noise_dn": 1.0,
 //                 "motion_blur": { "enabled": true, "subframes": 4, "disparity_spread_px": 1.0 },
 //                 "seed": 0 },
+//   "imu_timing": { "enabled": false, "time_offset_s": 0.0, "jitter_s": 0.0, "drop_probability": 0.0,
+//                   "position_m": [0, 0, 0], "misalignment_deg": 0.0, "seed": 0 },
+//   "frame_timing": { "enabled": false, "jitter_s": 0.0, "drop_probability": 0.0, "seed": 0 },
 //   "post_processing": { "enabled": false, "decimation": {...}, "threshold": {...},
 //                        "spatial": {...}, "temporal": {...}, "hole_filling": {...} },
 //   "imu": { "enabled": true, "accel_rate_hz": 250, "gyro_rate_hz": 400,
@@ -55,6 +58,7 @@
 #include "sensors/camera/realsense/realsense_edge_effects.hpp"
 #include "sensors/camera/realsense/realsense_exposure_model.hpp"
 #include "sensors/camera/realsense/realsense_imu_model.hpp"
+#include "sensors/camera/realsense/realsense_imu_timing.hpp"
 #include "sensors/camera/realsense/realsense_post_processing.hpp"
 #include "sensors/camera/realsense/realsense_profile.hpp"
 #include "sensors/camera/realsense/realsense_specular_model.hpp"
@@ -202,6 +206,20 @@ namespace hako::robots::sensor::camera::realsense
         }
     };
 
+    // RS-6: IMU timestamps / drops / lever arm / misalignment and camera frame
+    // timing (default off).
+    struct ImuTimingConfig
+    {
+        bool enabled {false};
+        ImuTimingParams params {};
+    };
+
+    struct FrameTimingConfig
+    {
+        bool enabled {false};
+        FrameTimingParams params {};
+    };
+
     struct RealSenseConfig
     {
         RealSenseProfile profile {};     // built-in profile with overrides applied
@@ -216,6 +234,8 @@ namespace hako::robots::sensor::camera::realsense
         SpecularModelConfig specular_model {};
         ThermalConfig thermal {};
         ExposureConfig exposure {};
+        ImuTimingConfig imu_timing {};
+        FrameTimingConfig frame_timing {};
         PostProcessingConfig post_processing {};
         ImuModelConfig imu {};
 
@@ -415,6 +435,12 @@ namespace hako::robots::sensor::camera::realsense
             || ex.rgb_light_level < 0.0 || ex.rgb_gain_noise_dn < 0.0
             || ex.motion_blur.subframes < 1 || ex.motion_blur.subframes > 64 || ex.motion_blur.disparity_spread_px <= 0.0)
             return "invalid exposure";
+        const auto& it = c.imu_timing.params;
+        if (it.jitter_s < 0.0 || it.drop_probability < 0.0 || it.drop_probability > 1.0 || it.misalignment_deg < 0.0)
+            return "invalid imu_timing";
+        const auto& ft = c.frame_timing.params;
+        if (ft.jitter_s < 0.0 || ft.drop_probability < 0.0 || ft.drop_probability > 1.0)
+            return "invalid frame_timing";
         if (c.ImuEnabled()) {
             if (c.imu.accel_rate_hz <= 0.0 || c.imu.gyro_rate_hz <= 0.0) return "invalid imu rate";
             if (c.imu.bias_mode != "none" && c.imu.bias_mode != "calibrated" && c.imu.bias_mode != "uncalibrated")
@@ -719,6 +745,31 @@ namespace hako::robots::sensor::camera::realsense
                     detail::ReadIf(b, "subframes", ex.motion_blur.subframes);
                     detail::ReadIf(b, "disparity_spread_px", ex.motion_blur.disparity_spread_px);
                 }
+            }
+            if (root.contains("imu_timing") && root.at("imu_timing").is_object()) {
+                const auto& t = root.at("imu_timing");
+                auto& ip = c.imu_timing.params;
+                detail::ReadIf(t, "enabled", c.imu_timing.enabled);
+                detail::ReadIf(t, "time_offset_s", ip.time_offset_s);
+                detail::ReadIf(t, "jitter_s", ip.jitter_s);
+                detail::ReadIf(t, "drop_probability", ip.drop_probability);
+                detail::ReadIf(t, "misalignment_deg", ip.misalignment_deg);
+                detail::ReadIf(t, "seed", ip.seed);
+                if (t.contains("position_m")) {
+                    const auto v = t.at("position_m").get<std::vector<double>>();
+                    if (v.size() != 3) {
+                        error = "imu_timing.position_m needs 3 values";
+                        return false;
+                    }
+                    for (int k = 0; k < 3; ++k) ip.position_m[k] = v[static_cast<std::size_t>(k)];
+                }
+            }
+            if (root.contains("frame_timing") && root.at("frame_timing").is_object()) {
+                const auto& t = root.at("frame_timing");
+                detail::ReadIf(t, "enabled", c.frame_timing.enabled);
+                detail::ReadIf(t, "jitter_s", c.frame_timing.params.jitter_s);
+                detail::ReadIf(t, "drop_probability", c.frame_timing.params.drop_probability);
+                detail::ReadIf(t, "seed", c.frame_timing.params.seed);
             }
             if (root.contains("post_processing") && root.at("post_processing").is_object()) {
                 detail::ReadPostProcessing(root.at("post_processing"), c.post_processing);

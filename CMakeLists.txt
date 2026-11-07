@@ -338,6 +338,16 @@ if(HAKO_SENSOR_BUILD_TESTS)
     endif()
     add_test(NAME realsense_exposure_model_test COMMAND realsense_exposure_model_test)
 
+    # RealSense IMU / frame timing, lever arm and misalignment (pure).
+    add_executable(realsense_imu_timing_test tests/realsense_imu_timing_test.cpp)
+    target_compile_features(realsense_imu_timing_test PRIVATE cxx_std_20)
+    target_include_directories(realsense_imu_timing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(realsense_imu_timing_test SYSTEM PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+    if(MSVC)
+        target_compile_options(realsense_imu_timing_test PRIVATE /utf-8)
+    endif()
+    add_test(NAME realsense_imu_timing_test COMMAND realsense_imu_timing_test)
+
     # Scan timestamps across the range sensors + their PDU headers.
     # Needs the PDU type headers (it asserts on the converted messages).
     if(EXISTS "${HAKO_PDU_TYPES_INCLUDE_DIR}/builtin_interfaces")
@@ -490,6 +500,8 @@ if(HAKO_SENSOR_BUILD_TESTS)
                 HAKO_SENSOR_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
             if(MSVC)
                 target_compile_options(realsense_render_smoke PRIVATE /utf-8)
+                # main() keeps dozens of sensors (each with several mt19937) on the stack.
+                target_link_options(realsense_render_smoke PRIVATE /STACK:16777216)
             endif()
             target_link_libraries(realsense_render_smoke PRIVATE hako_mujoco_sensor ${MUJOCO_LIBRARY})
             add_test(NAME realsense_render_smoke COMMAND realsense_render_smoke)

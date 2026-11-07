@@ -222,6 +222,9 @@ bool RealSenseCameraSensor::LoadConfig(const RealSenseConfig& config)
     texture_rng_.seed(config_.texture_model.seed);
     specular_rng_.seed(config_.specular_model.seed);
     exposure_rng_.seed(config_.exposure.seed);
+    frame_timing_.Configure(config_.frame_timing.params);
+    last_frame_dropped_ = false;
+    dropped_frames_ = 0;
     last_depth_exposure_ = ExposureDecision {};
     last_rgb_exposure_ = ExposureDecision {};
     last_blur_stats_ = BlurStats {};
@@ -423,9 +426,27 @@ bool RealSenseCameraSensor::RenderRgb(ImageFrame& rgb_out)
     return !rgb_out.data.empty();
 }
 
+void RealSenseCameraSensor::ApplyFrameTiming(DepthFrame& depth, ImageFrame* rgb)
+{
+    last_frame_dropped_ = false;
+    if (!config_.frame_timing.enabled) return;
+    if (frame_timing_.Drop()) {
+        last_frame_dropped_ = true;
+        ++dropped_frames_;
+        ClearDepthFrame(depth);
+        if (rgb) ClearImageFrame(*rgb);
+        return;
+    }
+    const double t = frame_timing_.Stamp(depth.timestamp);
+    const double shift = t - depth.timestamp;
+    depth.timestamp = t;
+    if (rgb && !rgb->data.empty()) rgb->timestamp += shift;
+}
+
 void RealSenseCameraSensor::CaptureDepth(DepthFrame& depth_out)
 {
     RenderDepth(depth_out, nullptr);
+    ApplyFrameTiming(depth_out, nullptr);
 }
 
 void RealSenseCameraSensor::Capture(ImageFrame& rgb_out, DepthFrame& depth_out)
@@ -433,14 +454,17 @@ void RealSenseCameraSensor::Capture(ImageFrame& rgb_out, DepthFrame& depth_out)
     if (!config_.RgbEnabled()) {
         ClearImageFrame(rgb_out);
         RenderDepth(depth_out, nullptr);
+        ApplyFrameTiming(depth_out, nullptr);
         return;
     }
     if (SharedRender()) {
         RenderDepth(depth_out, &rgb_out);
+        ApplyFrameTiming(depth_out, &rgb_out);
         return;
     }
     RenderDepth(depth_out, nullptr);
     RenderRgb(rgb_out);
+    ApplyFrameTiming(depth_out, &rgb_out);
 }
 
 }

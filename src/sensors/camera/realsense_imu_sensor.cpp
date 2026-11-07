@@ -49,6 +49,9 @@ bool RealSenseImuSensor::LoadConfig(const RealSenseConfig& config)
     config_ = config;
     model_.Configure(config_.profile.imu, config_.imu);
     thermal_.Configure(MakeThermalParams(config_));
+    timing_.Configure(config_.imu_timing.params);
+    dropped_accel_ = 0;
+    dropped_gyro_ = 0;
     Reset();
     return true;
 }
@@ -94,6 +97,19 @@ bool RealSenseImuSensor::TruthAccel(Vec3d& out) const
     return true;
 }
 
+bool RealSenseImuSensor::TruthAngularAccel(Vec3d& out) const
+{
+    const mjModel* m = world_->getModel();
+    mjData* d = world_->getData();
+    const int id = CameraId();
+    if (!m || !d || id < 0) return false;
+    mj_rnePostConstraint(m, d);
+    mjtNum res[6];
+    mj_objectAcceleration(m, d, mjOBJ_CAMERA, id, res, 1);
+    out = ToOptical(res);
+    return true;
+}
+
 void RealSenseImuSensor::Update(double delta_sec, std::vector<MotionSample>& accel_out,
                                 std::vector<MotionSample>& gyro_out)
 {
@@ -107,22 +123,40 @@ void RealSenseImuSensor::Update(double delta_sec, std::vector<MotionSample>& acc
     gyro_clock_ += delta_sec;
 
     const bool thermal = config_.thermal.enabled;
+    const bool timing = config_.imu_timing.enabled;
     const auto plus = [](const Vec3d& a, const Vec3d& b) { return Vec3d {a.x + b.x, a.y + b.y, a.z + b.z}; };
     Vec3d truth {};
     if (accel_clock_ >= accel_period && TruthAccel(truth)) {
+        if (timing && timing_.HasLeverArm()) {
+            Vec3d w {};
+            Vec3d alpha {};
+            if (TruthGyro(w) && TruthAngularAccel(alpha)) truth = LeverArmAccel(truth, w, alpha, timing_.Position());
+        }
+        if (timing) truth = timing_.Misalign(truth);
         if (thermal) truth = plus(truth, thermal_.AccelDrift(now));
         while (accel_clock_ >= accel_period) {
             accel_clock_ -= accel_period;
-            last_accel_ = {now - accel_clock_, model_.MeasureAccel(truth)};
+            if (timing && timing_.Drop()) {
+                ++dropped_accel_;
+                continue;
+            }
+            const double t = now - accel_clock_;
+            last_accel_ = {timing ? timing_.AccelStamp(t) : t, model_.MeasureAccel(truth)};
             accel_out.push_back(last_accel_);
             has_accel_ = true;
         }
     }
     if (gyro_clock_ >= gyro_period && TruthGyro(truth)) {
+        if (timing) truth = timing_.Misalign(truth);
         if (thermal) truth = plus(truth, thermal_.GyroDrift(now));
         while (gyro_clock_ >= gyro_period) {
             gyro_clock_ -= gyro_period;
-            last_gyro_ = {now - gyro_clock_, model_.MeasureGyro(truth)};
+            if (timing && timing_.Drop()) {
+                ++dropped_gyro_;
+                continue;
+            }
+            const double t = now - gyro_clock_;
+            last_gyro_ = {timing ? timing_.GyroStamp(t) : t, model_.MeasureGyro(truth)};
             gyro_out.push_back(last_gyro_);
             has_gyro_ = true;
         }

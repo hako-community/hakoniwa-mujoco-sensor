@@ -62,6 +62,12 @@ namespace hako::robots::sensor::camera::realsense
         // before the noise model. The IMU keeps its own ThermalModel (same config
         // -> same temperature curve as the camera when both start together).
         ThermalModel& GetThermalModel() { return thermal_; }
+        // RS-6 timing / mounting model (imu_timing.enabled) and dropped-sample counts.
+        const ImuTimingModel& GetTimingModel() const { return timing_; }
+        std::size_t DroppedAccel() const { return dropped_accel_; }
+        std::size_t DroppedGyro() const { return dropped_gyro_; }
+        // Angular acceleration at the current state (optical frame).
+        bool TruthAngularAccel(Vec3d& out) const;
         // IMU calibration at sim_time: the current temperature becomes T_cal.
         void RunImuCalibration(double sim_time) { thermal_.RunOnChipCalibration(sim_time); }
 
@@ -73,6 +79,9 @@ namespace hako::robots::sensor::camera::realsense
         RealSenseConfig config_ {};
         ImuNoiseModel model_ {};
         ThermalModel thermal_ {};
+        ImuTimingModel timing_ {};
+        std::size_t dropped_accel_ {0};
+        std::size_t dropped_gyro_ {0};
         double accel_clock_ {0.0};
         double gyro_clock_ {0.0};
         bool has_accel_ {false};
