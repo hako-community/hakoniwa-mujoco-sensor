@@ -48,6 +48,7 @@ bool RealSenseImuSensor::LoadConfig(const RealSenseConfig& config)
     }
     config_ = config;
     model_.Configure(config_.profile.imu, config_.imu);
+    thermal_.Configure(MakeThermalParams(config_));
     Reset();
     return true;
 }
@@ -105,8 +106,11 @@ void RealSenseImuSensor::Update(double delta_sec, std::vector<MotionSample>& acc
     accel_clock_ += delta_sec;
     gyro_clock_ += delta_sec;
 
+    const bool thermal = config_.thermal.enabled;
+    const auto plus = [](const Vec3d& a, const Vec3d& b) { return Vec3d {a.x + b.x, a.y + b.y, a.z + b.z}; };
     Vec3d truth {};
     if (accel_clock_ >= accel_period && TruthAccel(truth)) {
+        if (thermal) truth = plus(truth, thermal_.AccelDrift(now));
         while (accel_clock_ >= accel_period) {
             accel_clock_ -= accel_period;
             last_accel_ = {now - accel_clock_, model_.MeasureAccel(truth)};
@@ -115,6 +119,7 @@ void RealSenseImuSensor::Update(double delta_sec, std::vector<MotionSample>& acc
         }
     }
     if (gyro_clock_ >= gyro_period && TruthGyro(truth)) {
+        if (thermal) truth = plus(truth, thermal_.GyroDrift(now));
         while (gyro_clock_ >= gyro_period) {
             gyro_clock_ -= gyro_period;
             last_gyro_ = {now - gyro_clock_, model_.MeasureGyro(truth)};

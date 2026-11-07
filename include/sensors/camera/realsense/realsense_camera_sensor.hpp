@@ -80,6 +80,15 @@ namespace hako::robots::sensor::camera::realsense
         const TextureStats& GetLastTextureStats() const { return last_texture_stats_; }
         const SpecularModelParams& GetSpecularModelParams() const { return specular_params_; }
         const SpecularStats& GetLastSpecularStats() const { return last_specular_stats_; }
+
+        // RS-4 thermal drift (thermal.enabled). Temperature / disparity offset of the
+        // last depth capture (NaN / 0 when off), and the D400 on-chip self-calibration
+        // (current temperature becomes the calibration temperature).
+        double GetLastTemperatureC() const { return last_temperature_c_; }
+        double GetLastDisparityOffsetPx() const { return last_disparity_offset_px_; }
+        ThermalModel& GetThermalModel() { return thermal_; }
+        void RunOnChipCalibration();                 // at the last capture time
+        void RunOnChipCalibration(double sim_time);
         // IR material per MuJoCo material id (resolved at the first capture).
         const std::vector<IrMaterial>& GetResolvedMaterials() const { return materials_by_id_; }
         bool HasRgb() const { return config_.RgbEnabled(); }
@@ -123,6 +132,10 @@ namespace hako::robots::sensor::camera::realsense
         SpecularModelParams specular_params_ {};
         SpecularStats last_specular_stats_ {};
         std::mt19937 specular_rng_;
+        ThermalModel thermal_ {};
+        double last_capture_time_ {0.0};
+        double last_temperature_c_ {0.0};
+        double last_disparity_offset_px_ {0.0};
         std::mt19937 rgb_noise_rng_;
     };
 }

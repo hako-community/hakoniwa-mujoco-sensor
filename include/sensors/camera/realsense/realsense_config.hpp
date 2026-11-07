@@ -25,6 +25,10 @@
 //   "specular_model": { "enabled": false, "highlight": true, "highlight_width_deg": 8,
 //                       "interreflection": true, "max_distance_m": 0.5, "ray_stride_px": 4,
 //                       "min_specular": 0.5, "mirror_gain": 1.0, "seed": 0 },
+//   "thermal": { "enabled": false, "ambient_c": 25, "ambient_schedule": [[0, 15], [14400, 30]],
+//                "steady_rise_k": 15, "time_constant_s": 600, "start_warm": false,
+//                "calibration_temp_c": null, "disparity_coeff_px_per_k": 0.005,
+//                "accel_tco_mg_per_k": 1.0, "gyro_tco_dps_per_k": 0.015, "seed": 0 },
 //   "post_processing": { "enabled": false, "decimation": {...}, "threshold": {...},
 //                        "spatial": {...}, "temporal": {...}, "hole_filling": {...} },
 //   "imu": { "enabled": true, "accel_rate_hz": 250, "gyro_rate_hz": 400,
@@ -49,6 +53,7 @@
 #include "sensors/camera/realsense/realsense_profile.hpp"
 #include "sensors/camera/realsense/realsense_specular_model.hpp"
 #include "sensors/camera/realsense/realsense_texture_model.hpp"
+#include "sensors/camera/realsense/realsense_thermal_model.hpp"
 
 namespace hako::robots::sensor::camera::realsense
 {
@@ -148,6 +153,13 @@ namespace hako::robots::sensor::camera::realsense
         std::uint32_t seed {0};
     };
 
+    // RS-4: warm-up / ambient temperature drift of the depth and the IMU (default off).
+    struct ThermalConfig
+    {
+        bool enabled {false};
+        ThermalParams params {};   // laser_power_mw is taken from texture_model
+    };
+
     struct RealSenseConfig
     {
         RealSenseProfile profile {};     // built-in profile with overrides applied
@@ -160,6 +172,7 @@ namespace hako::robots::sensor::camera::realsense
         EdgeEffectsConfig edge_effects {};
         TextureModelConfig texture_model {};
         SpecularModelConfig specular_model {};
+        ThermalConfig thermal {};
         PostProcessingConfig post_processing {};
         ImuModelConfig imu {};
 
@@ -301,6 +314,13 @@ namespace hako::robots::sensor::camera::realsense
         return s;
     }
 
+    inline ThermalParams MakeThermalParams(const RealSenseConfig& c)
+    {
+        ThermalParams t = c.thermal.params;
+        t.laser_power_mw = c.texture_model.laser_power_mw;
+        return t;
+    }
+
     // Returns an empty string when valid, otherwise the reason.
     // Requests beyond the catalogue limits (resolution / fps) are allowed but
     // reported through `warnings`.
@@ -341,6 +361,10 @@ namespace hako::robots::sensor::camera::realsense
             || sm.ray_stride_px < 1 || sm.min_specular < 0.0 || sm.min_specular > 1.0 || sm.mirror_gain < 0.0
             || sm.max_rays < 0 || (!sm.projector_offset_m.empty() && sm.projector_offset_m.size() != 3))
             return "invalid specular_model";
+        const auto& th = c.thermal.params;
+        if (th.steady_rise_k < 0.0 || th.time_constant_s < 0.0 || th.laser_share < 0.0 || th.laser_share > 1.0
+            || th.accel_tco_mg_per_k < 0.0 || th.gyro_tco_dps_per_k < 0.0)
+            return "invalid thermal";
         if (c.ImuEnabled()) {
             if (c.imu.accel_rate_hz <= 0.0 || c.imu.gyro_rate_hz <= 0.0) return "invalid imu rate";
             if (c.imu.bias_mode != "none" && c.imu.bias_mode != "calibrated" && c.imu.bias_mode != "uncalibrated")
@@ -594,6 +618,31 @@ namespace hako::robots::sensor::camera::realsense
                 detail::ReadIf(t, "mirror_gain", sm.mirror_gain);
                 detail::ReadIf(t, "max_rays", sm.max_rays);
                 detail::ReadIf(t, "seed", sm.seed);
+            }
+            if (root.contains("thermal") && root.at("thermal").is_object()) {
+                const auto& t = root.at("thermal");
+                auto& tp = c.thermal.params;
+                detail::ReadIf(t, "enabled", c.thermal.enabled);
+                detail::ReadIf(t, "ambient_c", tp.ambient_c);
+                detail::ReadIf(t, "steady_rise_k", tp.steady_rise_k);
+                detail::ReadIf(t, "time_constant_s", tp.time_constant_s);
+                detail::ReadIf(t, "laser_share", tp.laser_share);
+                detail::ReadIf(t, "start_warm", tp.start_warm);
+                detail::ReadIf(t, "calibration_temp_c", tp.calibration_temp_c);
+                detail::ReadIf(t, "disparity_coeff_px_per_k", tp.disparity_coeff_px_per_k);
+                detail::ReadIf(t, "accel_tco_mg_per_k", tp.accel_tco_mg_per_k);
+                detail::ReadIf(t, "gyro_tco_dps_per_k", tp.gyro_tco_dps_per_k);
+                detail::ReadIf(t, "seed", tp.seed);
+                if (t.contains("ambient_schedule") && t.at("ambient_schedule").is_array()) {
+                    tp.ambient_schedule.clear();
+                    for (const auto& e : t.at("ambient_schedule")) {
+                        if (!e.is_array() || e.size() != 2) {
+                            error = "thermal.ambient_schedule entries must be [t_s, deg_c]";
+                            return false;
+                        }
+                        tp.ambient_schedule.emplace_back(e.at(0).get<double>(), e.at(1).get<double>());
+                    }
+                }
             }
             if (root.contains("post_processing") && root.at("post_processing").is_object()) {
                 detail::ReadPostProcessing(root.at("post_processing"), c.post_processing);

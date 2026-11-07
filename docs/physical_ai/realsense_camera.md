@@ -18,6 +18,7 @@ MuJoCo 描画の上に**機種プロファイル＋ステレオ深度誤差モ�
 | `include/sensors/camera/realsense/realsense_texture_model.hpp` | 材質表と、模様が見えない所の穴（RS-2、既定 OFF） | nlohmann のみ |
 | `config/realsense/materials.json` | 材質表のサンプル（MuJoCo の material 名 → IR の性質） | |
 | `include/sensors/camera/realsense/realsense_specular_model.hpp` | 光沢面の白飛びと相互反射の鏡像（RS-3、既定 OFF） | なし（光線は外から渡す） |
+| `include/sensors/camera/realsense/realsense_thermal_model.hpp` | 温度ドリフト：暖機・外気温・自己校正、深度と IMU（RS-4、既定 OFF） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_post_processing.hpp` | 後処理フィルター（間引き・閾値・空間・時間・穴埋め） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_imu_model.hpp` | IMU 誤差モデル（BMI055 / BMI085） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_config.hpp` | 設定構造体と JSON 読み込み・検証 | nlohmann のみ |
@@ -29,6 +30,7 @@ MuJoCo 描画の上に**機種プロファイル＋ステレオ深度誤差モ�
 | `tests/realsense_edge_effects_test.cpp` | 隠れ領域・飛び点・評価指標の単体テスト | 常にビルド |
 | `tests/realsense_texture_model_test.cpp` | 材質表・穴・入射角・ノイズ倍率の単体テスト | 常にビルド |
 | `tests/realsense_specular_model_test.cpp` | 白飛び・鏡像の単体テスト（解析的な光線で代用） | 常にビルド |
+| `tests/realsense_thermal_model_test.cpp` | 温度・視差のずれ・自己校正・IMU のゼロ点の単体テスト | 常にビルド |
 | `tests/realsense_render_smoke.cpp` | 実描画のスモークテスト（壁・ポール・回転台） | カメラ ON + libmujoco + OpenGL |
 
 ## 情報源
@@ -244,6 +246,38 @@ SNR = C / N + g · A · texture            ＋ 物体自身の模様
 - 鏡像は 1 回反射まで。鏡像の中の物体自身の材質（黒いので見えない、など）は確率に入れているが、鏡像の上の穴・飛び点は作らない。
 - 白飛びはプロジェクタの光だけ。照明の映り込みは入れていない。
 
+## 温度ドリフト（`thermal`、既定 OFF）
+
+起動直後からカメラ内部が暖まり（暖機）、外気温（工場の朝と昼など）でも温度が変わる。
+温度でレンズと基板が伸び縮みし、左右の画像の相対位置（視差の零点）がずれる。IMU のゼロ点も温度で動く。
+時刻はシミュレーション時刻（描画の `data->time`、IMU は `Update` 時の `data->time`）。
+
+```
+温度    T(t) = T_外気(t) + ΔT_定常 · (1 − exp(−(t − t_起動)/τ))     （start_warm なら ΔT_定常）
+        ΔT_定常 = steady_rise_k · ((1 − laser_share) + laser_share · P)   P = laser_power_mw / 150
+深度    視差に β · (T − T_校正) [px] を足す → 深度の誤差 ≈ −z² · β · ΔT / (fx · B)（距離の 2 乗で増える）
+IMU     ゼロ点 += TCO_軸 · (T − T_校正)   TCO_軸 は起動ごとに [−TCO, +TCO] の一様乱数（軸ごと）
+```
+
+- 外気温は `ambient_c`（一定）か、`ambient_schedule: [[t_s, °C], ...]`（直線補間、端は一定）。外気温の変化には遅れなく追従する（時間単位の変化を想定）。
+- 起動時刻は最初の撮影（IMU は最初の `Update`）の時刻。`GetThermalModel().PowerOn(t)` で指定もできる。
+- 校正温度 `calibration_temp_c` の既定は「25 °C で暖まった状態」（25 + ΔT_定常、プロジェクタ既定出力）。工場で暖機後に校正した個体を想定。
+- 自己校正: `RealSenseCameraSensor::RunOnChipCalibration()`（直前の撮影時刻）／`RunOnChipCalibration(t)`、
+  IMU は `RealSenseImuSensor::RunImuCalibration(t)`。その時点の温度が校正温度になる。
+- カメラと IMU はそれぞれ温度モデルを持つ（同じ設定・同じ時刻に起動すれば同じ温度の曲線）。
+
+| 設定 | 既定 | 種類 |
+|---|---|---|
+| `steady_rise_k`（ΔT_定常） | 15 K | **仮定値** |
+| `time_constant_s`（τ） | 600 s（10 分） | **仮定値** |
+| `laser_share` | 0.4（自己発熱のうちプロジェクタ分） | **仮定値** |
+| `disparity_coeff_px_per_k`（β） | 0.005 px/K | **仮定値**（D435 848 px で 2 m・15 K なら約 1.3 cm） |
+| `accel_tco_mg_per_k` | 1.0 mg/K | BMI055 データシートの値（**要確認**） |
+| `gyro_tco_dps_per_k` | 0.015 °/s/K | BMI055 データシートの値（**要確認**） |
+
+例（D435 848 px、既定値）: 冷えた状態で起動すると（25 °C、校正 40 °C、−0.075 px）、0.6 m で +1.2 mm、2 m で +13.5 mm 遠く読む。
+1 時間後（暖機済み）はほぼ 0。朝 15 °C → 昼 30 °C の工場では、暖機後でも −0.05 px（朝）〜 +0.025 px（昼）。
+
 ## 後処理フィルター（librealsense 相当、既定 OFF）
 
 順序: 間引き → 閾値 → 視差へ変換 → 空間 → 時間 → 深度へ戻す → 穴埋め。
@@ -325,14 +359,14 @@ if (cam.ShouldUpdate(dt)) {
 
 ## モデルに入れていないもの
 
-温度ドリフト、露光・ゲイン、モーションブラー、IMU とカメラ間の時刻ずれ。
+露光・ゲイン、モーションブラー、IMU とカメラ間の時刻ずれ。温度ドリフトは `thermal` で入れた。
 （深度の境界の飛び点と隠れ領域は `edge_effects`、模様の見えない所の穴は `texture_model`、
 光沢面の白飛びと相互反射は `specular_model` で入れた。ToF 型のマルチパスは扱わない。）
 
 ## テスト
 
 ```bash
-ctest --test-dir build -R "realsense_(depth_model|effects|edge_effects|texture_model|specular_model)_test" --output-on-failure
+ctest --test-dir build -R "realsense_(depth_model|effects|edge_effects|texture_model|specular_model|thermal_model)_test" --output-on-failure
 # 実描画（-DHAKO_SENSOR_BUILD_CAMERA=ON と MUJOCO_LIBRARY が必要）
 ctest --test-dir build -R realsense_render_smoke --output-on-failure
 ```
@@ -358,3 +392,11 @@ IMU のジャイロ真値 −5.000 rad/s・加速度真値 −9.81 m/s²（光�
 縦の円柱（半径 4 cm、0.76 m）は軸に沿った帯だけが白飛び（帯 0.479、側面 0.000。描画の円柱は多角柱なので、滑らかな円柱の値 約 0.68 より低い）。
 45° の板では側面の壁の鏡像が 0.59〜0.63 の画素に出て（モデル 0.64）、深度の中央値 0.998 m（式の値 約 1.00 m、板そのものは約 0.70 m）。
 解析シーン: 45° の鏡で 1.0 m の面に 0.5 m 先の壁が映り、鏡像は 1.500 m。
+
+2026-11-07（RS-4 追加後）: 単体テスト 6 本（132／58／37／47／30／36）、実描画 88/88 すべて合格。
+主な実測（D435i、2 m の壁）: 冷えた起動で壁の平均が +13.52 mm（式の値 +13.52 mm）、1 時間後 +0.03 mm、
+起動時に自己校正すると 0.00 mm。静止した IMU のジャイロは TCO·(25 − 40) を読み、校正後は 0。
+
+処理時間の再計測（2026-11-07）は、別のプロセスで CPU 使用率が 97〜100% のままで普段の値は取れていない。
+同じ条件の比較では、飛び点・影 18〜21 ms、材質の穴 19〜25 ms、鏡面（光線を除く）51〜62 ms で、
+鏡面は飛び点・影の約 2.7 倍（空いているときの飛び点・影 7.6 ms から、鏡面は普段 20 ms 前後と見込む）。

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -48,6 +49,16 @@ void RealSenseCameraSensor::SetCameraMotion(const CameraMotion& motion)
 {
     fixed_motion_ = motion;
     fixed_motion_set_ = true;
+}
+
+void RealSenseCameraSensor::RunOnChipCalibration()
+{
+    thermal_.RunOnChipCalibration(last_capture_time_);
+}
+
+void RealSenseCameraSensor::RunOnChipCalibration(double sim_time)
+{
+    thermal_.RunOnChipCalibration(sim_time);
 }
 
 void RealSenseCameraSensor::SetMaterialSource(std::shared_ptr<hako::robots::physics::IWorld> world)
@@ -160,6 +171,9 @@ bool RealSenseCameraSensor::LoadConfig(const RealSenseConfig& config)
     last_edge_stats_ = EdgeEffectsStats {};
     texture_params_ = MakeTextureModelParams(config_);
     specular_params_ = MakeSpecularModelParams(config_);
+    thermal_.Configure(MakeThermalParams(config_));
+    last_temperature_c_ = std::numeric_limits<double>::quiet_NaN();
+    last_disparity_offset_px_ = 0.0;
     last_specular_stats_ = SpecularStats {};
     last_texture_stats_ = TextureStats {};
     materials_resolved_ = false;
@@ -315,8 +329,15 @@ bool RealSenseCameraSensor::RenderDepth(DepthFrame& depth_out, ImageFrame* rgb_o
                 config_.texture_model.materials.default_material, specular_params_, MakeRayCaster(),
                 specular_rng_);
         }
+        DepthModelParams params = depth_params_;
+        if (config_.thermal.enabled) {
+            last_capture_time_ = raw.timestamp;
+            last_temperature_c_ = thermal_.TemperatureAt(raw.timestamp);
+            params.disparity_offset_px = thermal_.DisparityOffsetPx(raw.timestamp);
+        }
+        last_disparity_offset_px_ = params.disparity_offset_px;
         ApplyDepthModel(depth_out.data, depth_out.width, depth_out.height,
-                        depth_params_, depth_rng_, &raw.material_ids, sigma_scale);
+                        params, depth_rng_, &raw.material_ids, sigma_scale);
         int w = depth_out.width;
         int h = depth_out.height;
         post_.Apply(depth_out.data, w, h, depth_params_.fx_px, depth_params_.baseline_m,

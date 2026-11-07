@@ -20,7 +20,10 @@
 //     and the textured cardboard keeps part; texture model off is bit-identical,
 //   - RS-3 (separate scene): a face-on aluminum plate gets a highlight hole at the
 //     centre; a 45 deg aluminum plate mirrors the side wall, whose image appears
-//     behind the plate at z * (range + t) / range; specular model off is bit-identical.
+//     behind the plate at z * (range + t) / range; specular model off is bit-identical,
+//   - RS-4: a cold start makes the 2 m wall read ~1.3 cm farther (disparity offset
+//     -0.075 px), the warm camera reads true, the on-chip calibration removes the
+//     cold offset, and the IMU at rest reads its thermal zero-offset drift.
 
 #include <algorithm>
 #include <chrono>
@@ -656,6 +659,70 @@ int main()
             same = (std::isnan(dp.data[i]) && std::isnan(dof.data[i])) || dp.data[i] == dof.data[i];
         }
         check(same, "specular model off -> bit-identical depth");
+    }
+
+    std::printf("[RS-4 D435i thermal drift on the 2 m wall]\n");
+    {
+        mjData* d = world->getData();
+        SetYawRate(*world, 0.0);
+        d->time = 0.0;
+        mj_forward(world->getModel(), d);
+        rs::RealSenseConfig plain {};
+        rs::MakeDefaultConfig("D435i", plain);
+        plain.depth_model.seed = 21;
+        rs::RealSenseConfig hot = plain;
+        hot.thermal.enabled = true;
+        const auto mean_diff = [&](rs::RealSenseCameraSensor& a, rs::RealSenseCameraSensor& b) {
+            cam::DepthFrame fa;
+            cam::DepthFrame fb;
+            a.CaptureDepth(fa);
+            b.CaptureDepth(fb);
+            return ColumnStats(fb, 200, 600).mean - ColumnStats(fa, 200, 600).mean;
+        };
+        rs::RealSenseCameraSensor ref(renderer, "rs_depth");
+        rs::RealSenseCameraSensor th(renderer, "rs_depth");
+        check(ref.LoadConfig(plain) && th.LoadConfig(hot), "LoadConfig (thermal)");
+        const double fb = th.GetDepthModelParams().fx_px * th.GetDepthModelParams().baseline_m;
+        const double want_cold = fb / (fb / 2.0 - 0.075) - 2.0;
+        const double cold = mean_diff(ref, th);
+        std::printf("  cold start: T %.2f C, offset %+.4f px, wall mean %+.2f mm\n", th.GetLastTemperatureC(),
+                    th.GetLastDisparityOffsetPx(), cold * 1e3);
+        close_to(th.GetLastTemperatureC(), 25.0, 1e-9, "cold start temperature = ambient");
+        close_to(cold, want_cold, 0.0015, "cold start: wall reads farther by fB/(fB/z - 0.075) - z");
+
+        d->time = 3600.0;   // one hour later: warm (tau = 10 min)
+        const double warm = mean_diff(ref, th);
+        std::printf("  after 1 h : T %.2f C, offset %+.4f px, wall mean %+.2f mm\n", th.GetLastTemperatureC(),
+                    th.GetLastDisparityOffsetPx(), warm * 1e3);
+        close_to(warm, 0.0, 0.0015, "warm camera reads true (factory calibration is warm)");
+
+        d->time = 0.0;
+        rs::RealSenseCameraSensor ref2(renderer, "rs_depth");
+        rs::RealSenseCameraSensor cal(renderer, "rs_depth");
+        check(ref2.LoadConfig(plain) && cal.LoadConfig(hot), "LoadConfig (calibrated)");
+        cal.RunOnChipCalibration(0.0);
+        close_to(mean_diff(ref2, cal), 0.0, 0.0015, "on-chip calibration at the cold start removes the offset");
+
+        // IMU at rest, noise / bias / quantisation off: reads the thermal drift only.
+        rs::RealSenseConfig ic = hot;
+        ic.imu.bias_mode = "none";
+        ic.imu.noise_scale = 0.0;
+        ic.imu.quantize = false;
+        ic.imu.saturate = false;
+        rs::RealSenseImuSensor imu(world, "rs_depth");
+        check(imu.LoadConfig(ic), "IMU LoadConfig (thermal)");
+        std::vector<rs::MotionSample> accel;
+        std::vector<rs::MotionSample> gyro;
+        imu.Update(0.0101, accel, gyro);
+        const auto tco = imu.GetThermalModel().GyroTco();
+        check(!gyro.empty(), "gyro samples");
+        close_to(gyro.back().value.x, tco.x * (25.0 - 40.0), 1e-9, "IMU gyro x = TCO * (T - T_cal) at rest");
+        imu.RunImuCalibration(0.0);
+        accel.clear();
+        gyro.clear();
+        imu.Update(0.0101, accel, gyro);
+        close_to(gyro.back().value.x, 0.0, 1e-9, "IMU calibration removes the drift");
+        d->time = 0.0;
     }
 
     std::printf("realsense_render_smoke: %d/%d checks passed\n", g_checks - g_failures, g_checks);

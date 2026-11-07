@@ -53,6 +53,7 @@ namespace hako::robots::sensor::camera::realsense
         double min_z_m {0.1};
         double max_z_m {10.0};
         double disparity_sigma_px {0.0};
+        double disparity_offset_px {0.0};  // RS-4 thermal drift (added to the disparity)
         double subpixel_step_px {0.0};  // 0 = continuous
         double depth_unit_m {0.001};    // 0 = no quantisation
         bool left_invalid_band {true};
@@ -134,9 +135,10 @@ namespace hako::robots::sensor::camera::realsense
                 }
 
                 double zn = z;
-                if (fb > 0.0 && (m.disparity_sigma_px > 0.0 || m.subpixel_step_px > 0.0)) {
-                    // 3. disparity noise
-                    double d = fb / z;
+                if (fb > 0.0 && (m.disparity_sigma_px > 0.0 || m.subpixel_step_px > 0.0
+                                 || m.disparity_offset_px != 0.0)) {
+                    // 3. disparity noise (+ thermal offset)
+                    double d = fb / z + m.disparity_offset_px;
                     if (m.disparity_sigma_px > 0.0) {
                         const double scale = use_scale ? static_cast<double>((*sigma_scale)[i]) : 1.0;
                         d += m.disparity_sigma_px * scale * disparity_noise(rng);

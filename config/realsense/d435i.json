@@ -52,6 +52,20 @@
     "max_rays": 40000,
     "seed": 19
   },
+  "thermal": {
+    "enabled": false,
+    "ambient_c": 25.0,
+    "ambient_schedule": [],
+    "steady_rise_k": 15.0,
+    "time_constant_s": 600.0,
+    "laser_share": 0.4,
+    "start_warm": false,
+    "calibration_temp_c": null,
+    "disparity_coeff_px_per_k": 0.005,
+    "accel_tco_mg_per_k": 1.0,
+    "gyro_tco_dps_per_k": 0.015,
+    "seed": 23
+  },
   "post_processing": {
     "enabled": false,
     "disparity_domain": true,

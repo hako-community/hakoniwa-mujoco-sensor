@@ -58,6 +58,13 @@ namespace hako::robots::sensor::camera::realsense
 
         const ImuNoiseModel& NoiseModel() const { return model_; }
 
+        // RS-4 thermal zero-offset drift (thermal.enabled): added to the truth
+        // before the noise model. The IMU keeps its own ThermalModel (same config
+        // -> same temperature curve as the camera when both start together).
+        ThermalModel& GetThermalModel() { return thermal_; }
+        // IMU calibration at sim_time: the current temperature becomes T_cal.
+        void RunImuCalibration(double sim_time) { thermal_.RunOnChipCalibration(sim_time); }
+
     private:
         int CameraId() const;
 
@@ -65,6 +72,7 @@ namespace hako::robots::sensor::camera::realsense
         std::string camera_name_;
         RealSenseConfig config_ {};
         ImuNoiseModel model_ {};
+        ThermalModel thermal_ {};
         double accel_clock_ {0.0};
         double gyro_clock_ {0.0};
         bool has_accel_ {false};
