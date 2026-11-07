@@ -324,6 +324,20 @@ IMU     ゼロ点 += TCO_軸 · (T − T_校正)   TCO_軸 は起動ごとに [�
 | `motion_blur.subframes` | 4 | 速度と細かさの釣り合い |
 | `motion_blur.disparity_spread_px` | 1.0 px | **仮定値** |
 
+## バラ積みの見本場面と評価（RS-7）
+
+| ファイル | 内容 |
+|---|---|
+| `tools/gen_binpicking_scene.py` | 場面の生成（固定の種）。段ボールの箱にワーク 30 個（アルミの軸 12・黒染めのブロック 10・鋳物 8）、加工機の治具と見本荷姿、下向きのカメラ `rs_bin`（床から 0.75 m）と `rs_near`（0.40 m） |
+| `examples/realsense_binpicking/binpicking_scene.xml` | 生成した MJCF（ワークは自由物体。撮る前に物理で 3 秒落ち着かせる） |
+| `config/realsense/d435i_binpicking.json` | 全部入りのプリセット（D435i、冷えた起動 20 °C、自動露光、IMU の揺らぎ・取り付け角度） |
+| `config/realsense/d405_binpicking.json` | 近距離のプリセット（D405、実機どおりプロジェクタなし、照明 ambient_ir 0.5 は仮定） |
+| `tests/realsense_binpicking_eval.cpp` | 効果を 1 つずつ・全部入れたときの欠損率・外れ値率・RMS・撮影時間を箱の中で比べ、表（`realsense_binpicking_eval.md`）と図（RGB・理想の深度・全部入りの深度・誤差の図の PNG）を書き出す |
+
+結果（2026-11-07、D435i、箱の上 0.72 m）: 外れ値率は ステレオ誤差のみ 0.47% → 飛び点・影 5.89%、白飛び・鏡像 4.75%、
+冷えた起動 5.66%（約 2 mm の一様なずれ）、全部入り 14.51%。欠損率は全部入り 2.79%、カメラが 1 rad/s で振れると 7.12%。
+D405（0.37 m、パッシブ）は全部入りで欠損 18.93%。
+
 ## 後処理フィルター（librealsense 相当、既定 OFF）
 
 順序: 間引き → 閾値 → 視差へ変換 → 空間 → 時間 → 深度へ戻す → 穴埋め。

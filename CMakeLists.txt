@@ -505,6 +505,18 @@ if(HAKO_SENSOR_BUILD_TESTS)
             endif()
             target_link_libraries(realsense_render_smoke PRIVATE hako_mujoco_sensor ${MUJOCO_LIBRARY})
             add_test(NAME realsense_render_smoke COMMAND realsense_render_smoke)
+
+            # RS-7: every effect on the bin-picking sample scene -> metrics table (markdown).
+            add_executable(realsense_binpicking_eval tests/realsense_binpicking_eval.cpp)
+            target_compile_features(realsense_binpicking_eval PRIVATE cxx_std_20)
+            target_compile_definitions(realsense_binpicking_eval PRIVATE
+                HAKO_SENSOR_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+            if(MSVC)
+                target_compile_options(realsense_binpicking_eval PRIVATE /utf-8)
+                target_link_options(realsense_binpicking_eval PRIVATE /STACK:16777216)
+            endif()
+            target_link_libraries(realsense_binpicking_eval PRIVATE hako_mujoco_sensor ${MUJOCO_LIBRARY})
+            add_test(NAME realsense_binpicking_eval COMMAND realsense_binpicking_eval)
         endif()
 
         # M2 A-2 LiDAR demo: sense a simenv-data generated world (env.xml).

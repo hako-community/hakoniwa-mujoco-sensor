@@ -16,6 +16,7 @@
     "bin_*": "cardboard",
     "tray_*": "black_resin",
     "floor*": "concrete",
+    "fixture*": "ground_steel",
     "glass*": "glass"
   },
   "default": "white_resin"

@@ -1,0 +1,21 @@
+{
+  "_note": [
+    "RS-7 preset: D405 close to the pile (0.25-0.40 m) for fine detail (examples/realsense_binpicking).",
+    "Every effect is ON. D405 has no IR projector in the real product (passive stereo):",
+    "laser_power_mw 0, the surfaces' own texture and the hall light carry the matching (ambient_ir 0.5, assumed).",
+    "Texture-less shiny aluminum then loses about half of its depth, as passive stereo does."
+  ],
+  "model": "D405",
+  "frame_id": "near_camera",
+  "depth": { "width": 848, "height": 480, "fps": 30, "format": "DEPTH_F32_M" },
+  "rgb": { "enabled": true, "fps": 30, "format": "R8G8B8" },
+  "depth_model": { "enabled": true, "noise_model": "typical", "seed": 11 },
+  "rolling_shutter": { "enabled": true },
+  "edge_effects": { "enabled": true, "seed": 12 },
+  "texture_model": { "enabled": true, "materials": "materials.json", "laser_power_mw": 0, "ambient_ir": 0.5,
+                     "seed": 13 },
+  "specular_model": { "enabled": true, "seed": 14 },
+  "thermal": { "enabled": true, "ambient_c": 20.0, "seed": 15 },
+  "exposure": { "enabled": true, "auto": true, "seed": 16 },
+  "post_processing": { "enabled": false }
+}
