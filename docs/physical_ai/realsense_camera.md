@@ -17,6 +17,7 @@ MuJoCo 描画の上に**機種プロファイル＋ステレオ深度誤差モ�
 | `include/sensors/camera/realsense/realsense_depth_metrics.hpp` | 真値との比較（欠損率・外れ値率・RMS） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_texture_model.hpp` | 材質表と、模様が見えない所の穴（RS-2、既定 OFF） | nlohmann のみ |
 | `config/realsense/materials.json` | 材質表のサンプル（MuJoCo の material 名 → IR の性質） | |
+| `include/sensors/camera/realsense/realsense_specular_model.hpp` | 光沢面の白飛びと相互反射の鏡像（RS-3、既定 OFF） | なし（光線は外から渡す） |
 | `include/sensors/camera/realsense/realsense_post_processing.hpp` | 後処理フィルター（間引き・閾値・空間・時間・穴埋め） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_imu_model.hpp` | IMU 誤差モデル（BMI055 / BMI085） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_config.hpp` | 設定構造体と JSON 読み込み・検証 | nlohmann のみ |
@@ -27,6 +28,7 @@ MuJoCo 描画の上に**機種プロファイル＋ステレオ深度誤差モ�
 | `tests/realsense_effects_test.cpp` | 後処理・ローリングシャッター・IMU 誤差の単体テスト | 常にビルド |
 | `tests/realsense_edge_effects_test.cpp` | 隠れ領域・飛び点・評価指標の単体テスト | 常にビルド |
 | `tests/realsense_texture_model_test.cpp` | 材質表・穴・入射角・ノイズ倍率の単体テスト | 常にビルド |
+| `tests/realsense_specular_model_test.cpp` | 白飛び・鏡像の単体テスト（解析的な光線で代用） | 常にビルド |
 | `tests/realsense_render_smoke.cpp` | 実描画のスモークテスト（壁・ポール・回転台） | カメラ ON + libmujoco + OpenGL |
 
 ## 情報源
@@ -202,6 +204,46 @@ SNR = C / N + g · A · texture            ＋ 物体自身の模様
 - ローリングシャッターで深度を歪めたとき、材質 id は歪める前の画素のまま（ずれは行の読み出し中の動きの分だけ）。
 - 屋外の値（日光で模様が消える度合い）と、材質ごとの値は実測で合わせていない。
 
+## 光沢面の白飛びと相互反射（`specular_model`、既定 OFF）
+
+ステレオ方式では ToF のようなマルチパスは主な問題ではない。バラ積みの金属ワークで深度を壊すのは次の 2 つで、
+これに絞って入れた。材質の `specular` は材質表（`texture_model.materials`）から、
+プロジェクタの出力は `texture_model.laser_power_mw` から取る（`texture_model` 自体は OFF でもよい）。
+材質の穴（RS-2）の後、ステレオ深度誤差の前にかける。
+
+1. **白飛び**: 面の法線 n が、プロジェクタ方向とイメージャ方向の中間ベクトル h に近いと、
+   プロジェクタの光がそのまま返ってイメージャが飽和する → 穴。
+   `p = highlight_gain · specular · exp(−(α/α0)²) · min(1, P)`（α = ∠(n, h)、α0 = `highlight_width_deg`）。
+   正対した光沢板の中央に丸い穴、円柱では帯状の穴になる。
+2. **相互反射（鏡像）**: 光沢面は隣の物体（別のワーク・箱の壁）を映す。ステレオは映った模様を
+   **鏡の奥**にある物体として照合するので、深度は光の通った道のりになる:
+   `z' = z · (range + t) / range`（range はカメラから面まで、t は反射光線が当たるまで）。
+   確率 `p = mirror_gain · specular · ρ_当たった物体`。
+   - 反射光線は MuJoCo の `mj_ray` で飛ばす（`SetMaterialSource` か `SetMotionSource` の world）。
+     `specular ≥ min_specular` の画素だけ、`ray_stride_px` 四方のブロックに 1 本（ブロック内は当たった距離を共有）。
+   - 深度画像から戻した表面の点は描画の精度で鏡の内側に 0.1〜0.5 mm 入ることがあるので、
+     1 cm 未満の当たりは鏡自身とみなして先へ進めて飛ばし直す（最大 3 回、進めた距離は足す）。
+
+| 設定 | 既定 | 種類 |
+|---|---|---|
+| `highlight_width_deg`（α0） | 8 | **仮定値** |
+| `highlight_gain` / `mirror_gain` | 1.0 / 1.0 | **仮定値** |
+| `projector_offset_m` | (+B/2, 0, 0)（左イメージャ基準、光学座標） | 公開図面からの概略（**仮定値**） |
+| `max_distance_m` | 0.5 | 箱の大きさに合わせた設定値 |
+| `ray_stride_px` | 4 | 速度と細かさの釣り合い |
+| `min_specular` | 0.5 | アルミ 0.8・研削鋼 0.7 は対象、黒染め 0.3 は対象外 |
+| `max_rays` | 40000 | 1 フレームの上限 |
+
+処理時間（848×480、全画素が光沢の合成画像、光線の計算を除く）は約 61 ms。
+ただし計測時は PC の CPU 使用率が 100%（別のプロセス）で、他のモデルも普段の約 3 倍に出ていたので、普段は 20 ms 前後と見込む（要再計測）。
+実描画（2 枚の板）では、光線 2867 本で 1 回の撮影が約 80 ms 長くなった（同じ負荷の下で）。
+
+### 分かっている制約
+
+- ブロック内の画素は同じ反射距離を使うので、ブロックが別々の面にまたがると鏡像の位置がずれる。
+- 鏡像は 1 回反射まで。鏡像の中の物体自身の材質（黒いので見えない、など）は確率に入れているが、鏡像の上の穴・飛び点は作らない。
+- 白飛びはプロジェクタの光だけ。照明の映り込みは入れていない。
+
 ## 後処理フィルター（librealsense 相当、既定 OFF）
 
 順序: 間引き → 閾値 → 視差へ変換 → 空間 → 時間 → 深度へ戻す → 穴埋め。
@@ -283,13 +325,14 @@ if (cam.ShouldUpdate(dt)) {
 
 ## モデルに入れていないもの
 
-マルチパス（鏡面・相互反射）、温度ドリフト、露光・ゲイン、モーションブラー、IMU とカメラ間の時刻ずれ。
-（深度の境界の飛び点と隠れ領域は `edge_effects`、模様の見えない所の穴は `texture_model` で入れた。）
+温度ドリフト、露光・ゲイン、モーションブラー、IMU とカメラ間の時刻ずれ。
+（深度の境界の飛び点と隠れ領域は `edge_effects`、模様の見えない所の穴は `texture_model`、
+光沢面の白飛びと相互反射は `specular_model` で入れた。ToF 型のマルチパスは扱わない。）
 
 ## テスト
 
 ```bash
-ctest --test-dir build -R "realsense_(depth_model|effects|edge_effects|texture_model)_test" --output-on-failure
+ctest --test-dir build -R "realsense_(depth_model|effects|edge_effects|texture_model|specular_model)_test" --output-on-failure
 # 実描画（-DHAKO_SENSOR_BUILD_CAMERA=ON と MUJOCO_LIBRARY が必要）
 ctest --test-dir build -R realsense_render_smoke --output-on-failure
 ```
@@ -309,3 +352,9 @@ IMU のジャイロ真値 −5.000 rad/s・加速度真値 −9.81 m/s²（光�
 プロジェクタ OFF では 黒染め 1.000、アルミ 1.000、段ボール 0.499。
 合成画像: 黒染めの穴は 1.8 / 2.2 / 2.8 m で 0.043 / 0.264 / 0.786（モデル 0.044 / 0.266 / 0.783）、
 2 m で正対 0.115 → 70° 傾けると 0.764。
+
+2026-11-07（RS-3 追加後）: 単体テスト 5 本（132／58／37／47／30）、実描画 78/78 すべて合格。
+主な実測（D435、アルミ）: 正対した板の白飛び 中央 0.776（モデル約 0.79）、中央から約 8° で 0.225（モデル約 0.27）。
+縦の円柱（半径 4 cm、0.76 m）は軸に沿った帯だけが白飛び（帯 0.479、側面 0.000。描画の円柱は多角柱なので、滑らかな円柱の値 約 0.68 より低い）。
+45° の板では側面の壁の鏡像が 0.59〜0.63 の画素に出て（モデル 0.64）、深度の中央値 0.998 m（式の値 約 1.00 m、板そのものは約 0.70 m）。
+解析シーン: 45° の鏡で 1.0 m の面に 0.5 m 先の壁が映り、鏡像は 1.500 m。

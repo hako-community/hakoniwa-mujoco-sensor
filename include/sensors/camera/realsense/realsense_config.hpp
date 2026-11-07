@@ -22,6 +22,9 @@
 //                                        "probability": 0.5 }, "seed": 0 },
 //   "texture_model": { "enabled": false, "materials": "materials.json" | { ... },
 //                      "laser_power_mw": 150, "ambient_ir": 0.1, "seed": 0 },
+//   "specular_model": { "enabled": false, "highlight": true, "highlight_width_deg": 8,
+//                       "interreflection": true, "max_distance_m": 0.5, "ray_stride_px": 4,
+//                       "min_specular": 0.5, "mirror_gain": 1.0, "seed": 0 },
 //   "post_processing": { "enabled": false, "decimation": {...}, "threshold": {...},
 //                        "spatial": {...}, "temporal": {...}, "hole_filling": {...} },
 //   "imu": { "enabled": true, "accel_rate_hz": 250, "gyro_rate_hz": 400,
@@ -44,6 +47,7 @@
 #include "sensors/camera/realsense/realsense_imu_model.hpp"
 #include "sensors/camera/realsense/realsense_post_processing.hpp"
 #include "sensors/camera/realsense/realsense_profile.hpp"
+#include "sensors/camera/realsense/realsense_specular_model.hpp"
 #include "sensors/camera/realsense/realsense_texture_model.hpp"
 
 namespace hako::robots::sensor::camera::realsense
@@ -126,6 +130,24 @@ namespace hako::robots::sensor::camera::realsense
         std::uint32_t seed {0};
     };
 
+    // RS-3: highlights + inter-reflections of shiny materials (default off).
+    // Uses texture_model.materials (specular) and texture_model.laser_power_mw.
+    struct SpecularModelConfig
+    {
+        bool enabled {false};
+        bool highlight {true};
+        double highlight_width_deg {8.0};
+        double highlight_gain {1.0};
+        std::vector<double> projector_offset_m {};   // empty = (+B/2, 0, 0) (assumed)
+        bool interreflection {true};
+        double max_distance_m {0.5};
+        int ray_stride_px {4};
+        double min_specular {0.5};
+        double mirror_gain {1.0};
+        int max_rays {40000};
+        std::uint32_t seed {0};
+    };
+
     struct RealSenseConfig
     {
         RealSenseProfile profile {};     // built-in profile with overrides applied
@@ -137,6 +159,7 @@ namespace hako::robots::sensor::camera::realsense
         RollingShutterConfig rolling_shutter {};
         EdgeEffectsConfig edge_effects {};
         TextureModelConfig texture_model {};
+        SpecularModelConfig specular_model {};
         PostProcessingConfig post_processing {};
         ImuModelConfig imu {};
 
@@ -249,6 +272,35 @@ namespace hako::robots::sensor::camera::realsense
         return t;
     }
 
+    // Specular-model parameters for the configured depth stream (render size).
+    inline SpecularModelParams MakeSpecularModelParams(const RealSenseConfig& c)
+    {
+        SpecularModelParams s {};
+        const auto& m = c.specular_model;
+        s.highlight = m.highlight;
+        s.highlight_width_deg = m.highlight_width_deg;
+        s.highlight_gain = m.highlight_gain;
+        s.laser_power_mw = c.texture_model.laser_power_mw;
+        if (m.projector_offset_m.size() == 3) {
+            for (int k = 0; k < 3; ++k) s.projector_offset_m[k] = m.projector_offset_m[static_cast<std::size_t>(k)];
+        } else {
+            s.projector_offset_m[0] = 0.5 * c.profile.baseline_m;
+            s.projector_offset_m[1] = 0.0;
+            s.projector_offset_m[2] = 0.0;
+        }
+        s.interreflection = m.interreflection;
+        s.max_distance_m = m.max_distance_m;
+        s.ray_stride_px = m.ray_stride_px;
+        s.min_specular = m.min_specular;
+        s.mirror_gain = m.mirror_gain;
+        s.max_rays = static_cast<std::size_t>(std::max(0, m.max_rays));
+        s.fx_px = FocalLengthPx(c.depth.width, c.profile.DepthHfovRad());
+        s.fy_px = s.fx_px;
+        s.cx_px = c.depth.width * 0.5;
+        s.cy_px = c.depth.height * 0.5;
+        return s;
+    }
+
     // Returns an empty string when valid, otherwise the reason.
     // Requests beyond the catalogue limits (resolution / fps) are allowed but
     // reported through `warnings`.
@@ -284,6 +336,11 @@ namespace hako::robots::sensor::camera::realsense
         if (tm.laser_power_mw < 0.0 || tm.ambient_ir < 0.0 || tm.reference_range_m <= 0.0 || tm.steepness <= 0.0
             || tm.noise_gain < 0.0 || tm.ambient_noise_gain < 0.0 || tm.passive_gain < 0.0)
             return "invalid texture_model";
+        const auto& sm = c.specular_model;
+        if (sm.highlight_width_deg <= 0.0 || sm.highlight_gain < 0.0 || sm.max_distance_m <= 0.0
+            || sm.ray_stride_px < 1 || sm.min_specular < 0.0 || sm.min_specular > 1.0 || sm.mirror_gain < 0.0
+            || sm.max_rays < 0 || (!sm.projector_offset_m.empty() && sm.projector_offset_m.size() != 3))
+            return "invalid specular_model";
         if (c.ImuEnabled()) {
             if (c.imu.accel_rate_hz <= 0.0 || c.imu.gyro_rate_hz <= 0.0) return "invalid imu rate";
             if (c.imu.bias_mode != "none" && c.imu.bias_mode != "calibrated" && c.imu.bias_mode != "uncalibrated")
@@ -521,6 +578,22 @@ namespace hako::robots::sensor::camera::realsense
                     }
                     if (!MaterialTableFromJson(table, tm.materials, error)) return false;
                 }
+            }
+            if (root.contains("specular_model") && root.at("specular_model").is_object()) {
+                const auto& t = root.at("specular_model");
+                auto& sm = c.specular_model;
+                detail::ReadIf(t, "enabled", sm.enabled);
+                detail::ReadIf(t, "highlight", sm.highlight);
+                detail::ReadIf(t, "highlight_width_deg", sm.highlight_width_deg);
+                detail::ReadIf(t, "highlight_gain", sm.highlight_gain);
+                detail::ReadIf(t, "projector_offset_m", sm.projector_offset_m);
+                detail::ReadIf(t, "interreflection", sm.interreflection);
+                detail::ReadIf(t, "max_distance_m", sm.max_distance_m);
+                detail::ReadIf(t, "ray_stride_px", sm.ray_stride_px);
+                detail::ReadIf(t, "min_specular", sm.min_specular);
+                detail::ReadIf(t, "mirror_gain", sm.mirror_gain);
+                detail::ReadIf(t, "max_rays", sm.max_rays);
+                detail::ReadIf(t, "seed", sm.seed);
             }
             if (root.contains("post_processing") && root.at("post_processing").is_object()) {
                 detail::ReadPostProcessing(root.at("post_processing"), c.post_processing);

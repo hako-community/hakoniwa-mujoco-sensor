@@ -17,9 +17,13 @@
 //   - RS-2: three panels at 2.45 m (camera looking -y) with MuJoCo materials mapped
 //     by config/realsense/materials.json: black oxide loses most depth, aluminum and
 //     cardboard stay valid; with the projector off the texture-less aluminum is lost
-//     and the textured cardboard keeps part; texture model off is bit-identical.
+//     and the textured cardboard keeps part; texture model off is bit-identical,
+//   - RS-3 (separate scene): a face-on aluminum plate gets a highlight hole at the
+//     centre; a 45 deg aluminum plate mirrors the side wall, whose image appears
+//     behind the plate at z * (range + t) / range; specular model off is bit-identical.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -69,6 +73,28 @@ const char* kScene = R"(
     <geom name="panel_black" type="box" pos="0.45 -2.5 1" size="0.2 0.05 0.3" material="work_black_plate"/>
     <geom name="panel_alu" type="box" pos="0 -2.5 1" size="0.2 0.05 0.3" material="work_alu_plate"/>
     <geom name="panel_card" type="box" pos="-0.45 -2.5 1" size="0.2 0.05 0.3" material="bin_card"/>
+  </worldbody>
+</mujoco>
+)";
+
+// RS-3: shiny plates. Camera at the origin looking +x (image right = world -y).
+const char* kSpecScene = R"(
+<mujoco model="realsense_specular">
+  <visual><global offwidth="1920" offheight="1080"/></visual>
+  <asset>
+    <material name="wall_mat" rgba="0.8 0.7 0.6 1"/>
+    <material name="work_alu_face" rgba="0.7 0.7 0.75 1"/>
+    <material name="work_alu_mirror" rgba="0.7 0.7 0.75 1"/>
+    <material name="work_alu_shaft" rgba="0.7 0.7 0.75 1"/>
+  </asset>
+  <worldbody>
+    <light pos="0 0 3" dir="0 0 -1"/>
+    <camera name="rs_spec" pos="0 0 1" xyaxes="0 -1 0 0 0 1"/>
+    <geom name="backdrop" type="box" pos="2.05 0 1" size="0.05 3 3" material="wall_mat"/>
+    <geom name="face_plate" type="box" pos="0.6 0.25 1" euler="0 0 22.62" size="0.005 0.12 0.12" material="work_alu_face"/>
+    <geom name="mirror_plate" type="box" pos="0.7 -0.3 1" euler="0 0 45" size="0.005 0.12 0.1" material="work_alu_mirror"/>
+    <geom name="side_wall" type="box" pos="0.8 -0.65 1" size="0.4 0.05 0.5" material="wall_mat"/>
+    <geom name="shaft" type="cylinder" pos="0.8 0 1" size="0.04 0.15" material="work_alu_shaft"/>
   </worldbody>
 </mujoco>
 )";
@@ -535,6 +561,101 @@ int main()
             same = (std::isnan(dp.data[i]) && std::isnan(dof.data[i])) || dp.data[i] == dof.data[i];
         }
         check(same, "texture model off -> bit-identical depth");
+    }
+
+    std::printf("[RS-3 D435 specular model: face-on and 45 deg aluminum plates]\n");
+    {
+        auto sworld = std::make_shared<XmlWorld>();
+        sworld->loadModel(kSpecScene);
+        check(sworld->getModel() != nullptr, "specular scene loads");
+        auto srenderer = std::make_shared<cam::MujocoCameraRenderer>(sworld);
+        const auto patch = [](const cam::DepthFrame& f, int u0, int u1, int v0, int v1, std::vector<float>& vals) {
+            std::size_t n = 0, holes = 0;
+            vals.clear();
+            for (int y = v0; y <= v1; ++y) {
+                for (int x = u0; x <= u1; ++x) {
+                    const float v = f.data[static_cast<std::size_t>(y) * f.width + x];
+                    ++n;
+                    if (std::isfinite(v)) vals.push_back(v); else ++holes;
+                }
+            }
+            return static_cast<double>(holes) / static_cast<double>(n);
+        };
+        const auto j = nlohmann::json::parse(R"({ "model": "D435",
+            "texture_model": { "materials": "materials.json" },
+            "specular_model": { "enabled": true, "seed": 9 } })");
+        rs::RealSenseConfig c {};
+        std::string err;
+        check(rs::RealSenseConfigFromJson(j, c, err, std::string(HAKO_SENSOR_SOURCE_DIR) + "/config/realsense"),
+              "config with specular_model: " + err);
+        c.depth_model.seed = 5;
+        rs::RealSenseCameraSensor sensor(srenderer, "rs_spec");
+        sensor.SetMaterialSource(sworld);
+        check(sensor.LoadConfig(c), "LoadConfig (specular)");
+        cam::DepthFrame depth;
+        const auto t0 = std::chrono::steady_clock::now();
+        sensor.CaptureDepth(depth);
+        const double ms_on = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        const auto st = sensor.GetLastSpecularStats();
+
+        std::vector<float> vals;
+        // Face-on plate centre at u ~ 238 (y = +0.25 -> image left), v = 240.
+        const double centre = patch(depth, 228, 248, 230, 250, vals);
+        // ~9.5 deg off the plate normal; the projector at +B/2 shifts the mirror
+        // direction ~1.1 deg to the right -> alpha ~ 8.4 deg -> p ~ 0.8 * e^-1.1 ~ 0.27
+        const double side = patch(depth, 315, 325, 230, 250, vals);
+        std::printf("  face-on plate: highlight holes centre %.3f, ~8 deg off %.3f\n", centre, side);
+        check(centre > 0.6, "face-on shiny plate: highlight hole at the centre");
+        check(side < centre - 0.3, "highlight fades away from the mirror direction");
+
+        // Vertical aluminum shaft (r = 4 cm at 0.76 m, centre column 424): a narrow
+        // highlight band where the surface faces the camera, none on the flanks.
+        const double band = patch(depth, 421, 427, 225, 255, vals);
+        const double flank = patch(depth, 436, 442, 225, 255, vals);
+        const double flank_l = patch(depth, 406, 412, 225, 255, vals);
+        std::printf("  shaft: highlight holes centre band %.3f, flanks %.3f / %.3f\n", band, flank_l, flank);
+        // The rendered cylinder is a polygon prism (stepwise normals), so the band is
+        // somewhat weaker than the smooth-cylinder value (~0.68).
+        check(band > 0.3 && band > std::max(flank, flank_l) + 0.3, "shiny cylinder: highlight band along the axis");
+        check(flank < 0.15 && flank_l < 0.15, "cylinder flanks keep their depth");
+
+        // 45 deg plate centre at u ~ 615 (y = -0.3 -> image right).
+        patch(depth, 603, 627, 230, 250, vals);
+        std::size_t mirrored = 0;
+        std::vector<float> mir;
+        for (float v : vals) if (v > 0.85F) { ++mirrored; mir.push_back(v); }
+        std::sort(mir.begin(), mir.end());
+        const double frac = vals.empty() ? 0.0 : static_cast<double>(mirrored) / vals.size();
+        const double med = mir.empty() ? 0.0 : mir[mir.size() / 2];
+        std::printf("  45 deg plate: mirrored %.3f of valid pixels, median depth %.3f m (plate ~0.70 m), rays %zu (hits %zu), mirrored px %zu, %.1f ms\n",
+                    frac, med, st.rays, st.ray_hits, st.mirror_pixels, ms_on);
+        // p = mirror_gain * specular(0.8) * rho_wall(white resin 0.8) = 0.64
+        close_to(frac, 0.64, 0.12, "mirror image fraction = gain * specular * rho");
+        close_to(med, 1.0, 0.05, "mirror image at z * (range + t) / range ~ 1.0 m");
+        check(st.rays > 0 && st.mirror_pixels > 0 && st.highlight_holes > 0, "stats");
+
+        // Specular model off: bit-identical to the plain config.
+        rs::RealSenseConfig plain {};
+        rs::MakeDefaultConfig("D435", plain);
+        plain.depth_model.seed = 5;
+        rs::RealSenseConfig off = c;
+        off.specular_model.enabled = false;
+        rs::RealSenseCameraSensor sp(srenderer, "rs_spec");
+        rs::RealSenseCameraSensor so(srenderer, "rs_spec");
+        so.SetMaterialSource(sworld);
+        check(sp.LoadConfig(plain) && so.LoadConfig(off), "LoadConfig (regression pair)");
+        cam::DepthFrame dp;
+        cam::DepthFrame dof;
+        sp.CaptureDepth(dp);
+        const auto t1 = std::chrono::steady_clock::now();
+        so.CaptureDepth(dof);
+        const double ms_off = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count();
+        std::printf("  capture time: specular on %.1f ms, off %.1f ms\n", ms_on, ms_off);
+        bool same = dp.data.size() == dof.data.size();
+        for (std::size_t i = 0; same && i < dp.data.size(); ++i) {
+            same = (std::isnan(dp.data[i]) && std::isnan(dof.data[i])) || dp.data[i] == dof.data[i];
+        }
+        check(same, "specular model off -> bit-identical depth");
     }
 
     std::printf("realsense_render_smoke: %d/%d checks passed\n", g_checks - g_failures, g_checks);

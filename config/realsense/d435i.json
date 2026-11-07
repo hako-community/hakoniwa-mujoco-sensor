@@ -39,6 +39,19 @@
     "passive_gain": 20.0,
     "seed": 17
   },
+  "specular_model": {
+    "enabled": false,
+    "highlight": true,
+    "highlight_width_deg": 8.0,
+    "highlight_gain": 1.0,
+    "interreflection": true,
+    "max_distance_m": 0.5,
+    "ray_stride_px": 4,
+    "min_specular": 0.5,
+    "mirror_gain": 1.0,
+    "max_rays": 40000,
+    "seed": 19
+  },
   "post_processing": {
     "enabled": false,
     "disparity_domain": true,

@@ -12,6 +12,8 @@
 //                                   shadow + flying pixels)
 //   -> weak-pattern holes          (realsense_texture_model.hpp, optional: material
 //                                   table by MuJoCo material name, projector, ambient)
+//   -> shiny surfaces              (realsense_specular_model.hpp, optional: highlight
+//                                   holes + mirror images via mj_ray)
 //   -> stereo depth model          (realsense_depth_model.hpp)
 //   -> post-processing             (librealsense-style filters, optional)
 //
@@ -76,6 +78,8 @@ namespace hako::robots::sensor::camera::realsense
         const EdgeEffectsStats& GetLastEdgeEffectsStats() const { return last_edge_stats_; }
         const TextureModelParams& GetTextureModelParams() const { return texture_params_; }
         const TextureStats& GetLastTextureStats() const { return last_texture_stats_; }
+        const SpecularModelParams& GetSpecularModelParams() const { return specular_params_; }
+        const SpecularStats& GetLastSpecularStats() const { return last_specular_stats_; }
         // IR material per MuJoCo material id (resolved at the first capture).
         const std::vector<IrMaterial>& GetResolvedMaterials() const { return materials_by_id_; }
         bool HasRgb() const { return config_.RgbEnabled(); }
@@ -90,6 +94,7 @@ namespace hako::robots::sensor::camera::realsense
         bool SharedRender() const;
         CameraMotion MotionOf(const std::string& camera_name) const;
         void ResolveMaterials();
+        RayCastFn MakeRayCaster() const;
         void ProcessRgb(ImageFrame& rgb, const CameraMotion& motion, const std::vector<float>* ref_depth);
 
         std::shared_ptr<MujocoCameraRenderer> renderer_;
@@ -115,6 +120,9 @@ namespace hako::robots::sensor::camera::realsense
         bool materials_resolved_ {false};
         std::vector<float> sigma_scale_ {};
         std::mt19937 texture_rng_;
+        SpecularModelParams specular_params_ {};
+        SpecularStats last_specular_stats_ {};
+        std::mt19937 specular_rng_;
         std::mt19937 rgb_noise_rng_;
     };
 }

@@ -76,6 +76,56 @@ void RealSenseCameraSensor::ResolveMaterials()
     materials_by_id_ = config_.texture_model.materials.Resolve(names);
 }
 
+RayCastFn RealSenseCameraSensor::MakeRayCaster() const
+{
+    if (!config_.specular_model.interreflection) return {};
+    const auto world = material_world_ ? material_world_ : motion_world_;
+    const mjModel* m = world ? world->getModel() : nullptr;
+    const mjData* d = world ? world->getData() : nullptr;
+    if (!m || !d) return {};
+    const int cam = mj_name2id(m, mjOBJ_CAMERA, depth_camera_name_.c_str());
+    if (cam < 0) return {};
+    const mjtNum* pos = d->cam_xpos + 3 * cam;
+    const mjtNum* rot = d->cam_xmat + 9 * cam;   // world = rot * camera-local
+    const IrMaterial fallback = config_.texture_model.materials.default_material;
+    const std::vector<IrMaterial>* mats = &materials_by_id_;
+    // optical (x right, y down, z fwd) -> MuJoCo camera (x right, y up, z back) -> world
+    return [m, d, pos, rot, fallback, mats](const double o[3], const double v[3], double max_dist,
+                                            IrMaterial& hit_material) -> double {
+        const mjtNum lo[3] = {o[0], -o[1], -o[2]};
+        const mjtNum lv[3] = {v[0], -v[1], -v[2]};
+        mjtNum wo[3];
+        mjtNum wv[3];
+        for (int i = 0; i < 3; ++i) {
+            wo[i] = pos[i] + rot[3 * i] * lo[0] + rot[3 * i + 1] * lo[1] + rot[3 * i + 2] * lo[2];
+            wv[i] = rot[3 * i] * lv[0] + rot[3 * i + 1] * lv[1] + rot[3 * i + 2] * lv[2];
+        }
+        // The surface point comes from the rendered depth and can sit a fraction of a
+        // millimetre inside the mirror geom; hits closer than kSelfSkip are the mirror
+        // itself (its back face): step past them and cast again.
+        constexpr mjtNum kSelfSkip = 0.01;
+        constexpr int kMaxSkips = 3;
+        int geomid = -1;
+        mjtNum travelled = 0.0;
+        mjtNum dist = -1.0;
+        for (int k = 0; k <= kMaxSkips; ++k) {
+            geomid = -1;
+            dist = mj_ray(m, d, wo, wv, nullptr, 1, -1, &geomid, nullptr);
+            if (dist < 0 || geomid < 0 || dist >= kSelfSkip || k == kMaxSkips) break;
+            const mjtNum step = dist + 1.0e-4;
+            for (int i = 0; i < 3; ++i) wo[i] += step * wv[i];
+            travelled += step;
+        }
+        if (dist < 0 || geomid < 0 || dist < kSelfSkip) return -1.0;
+        dist += travelled;
+        if (dist > max_dist) return -1.0;
+        const int mat = m->geom_matid[geomid];
+        hit_material = (mat >= 0 && static_cast<std::size_t>(mat) < mats->size())
+            ? (*mats)[static_cast<std::size_t>(mat)] : fallback;
+        return static_cast<double>(dist);
+    };
+}
+
 void RealSenseCameraSensor::Reset()
 {
     CameraSensorBase::Reset();
@@ -109,6 +159,8 @@ bool RealSenseCameraSensor::LoadConfig(const RealSenseConfig& config)
     edge_params_ = MakeEdgeEffectsParams(config_, depth_params_);
     last_edge_stats_ = EdgeEffectsStats {};
     texture_params_ = MakeTextureModelParams(config_);
+    specular_params_ = MakeSpecularModelParams(config_);
+    last_specular_stats_ = SpecularStats {};
     last_texture_stats_ = TextureStats {};
     materials_resolved_ = false;
 
@@ -154,6 +206,7 @@ bool RealSenseCameraSensor::LoadConfig(const RealSenseConfig& config)
     depth_rng_.seed(config_.depth_model.seed);
     edge_rng_.seed(config_.edge_effects.seed);
     texture_rng_.seed(config_.texture_model.seed);
+    specular_rng_.seed(config_.specular_model.seed);
     rgb_noise_rng_.seed(config_.rgb_noise.seed);
     post_.Reset();
     StartScheduler(config_.depth.fps);
@@ -253,6 +306,14 @@ bool RealSenseCameraSensor::RenderDepth(DepthFrame& depth_out, ImageFrame* rgb_o
                 depth_out.data, depth_out.width, depth_out.height, &raw.material_ids, materials_by_id_,
                 config_.texture_model.materials.default_material, texture_params_, texture_rng_, sigma_scale_);
             sigma_scale = &sigma_scale_;
+        }
+        last_specular_stats_ = SpecularStats {};
+        if (config_.specular_model.enabled) {
+            if (!materials_resolved_) ResolveMaterials();
+            last_specular_stats_ = ApplySpecularModel(
+                depth_out.data, depth_out.width, depth_out.height, &raw.material_ids, materials_by_id_,
+                config_.texture_model.materials.default_material, specular_params_, MakeRayCaster(),
+                specular_rng_);
         }
         ApplyDepthModel(depth_out.data, depth_out.width, depth_out.height,
                         depth_params_, depth_rng_, &raw.material_ids, sigma_scale);
