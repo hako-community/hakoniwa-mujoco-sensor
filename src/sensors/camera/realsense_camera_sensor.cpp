@@ -221,6 +221,10 @@ bool RealSenseCameraSensor::LoadConfig(const RealSenseConfig& config)
     edge_rng_.seed(config_.edge_effects.seed);
     texture_rng_.seed(config_.texture_model.seed);
     specular_rng_.seed(config_.specular_model.seed);
+    exposure_rng_.seed(config_.exposure.seed);
+    last_depth_exposure_ = ExposureDecision {};
+    last_rgb_exposure_ = ExposureDecision {};
+    last_blur_stats_ = BlurStats {};
     rgb_noise_rng_.seed(config_.rgb_noise.seed);
     post_.Reset();
     StartScheduler(config_.depth.fps);
@@ -262,10 +266,28 @@ void RealSenseCameraSensor::ProcessRgb(ImageFrame& rgb, const CameraMotion& moti
                                        const std::vector<float>* ref_depth)
 {
     const double readout = config_.RgbReadoutS();
-    if (config_.rolling_shutter.enabled && readout > 0.0 && !rgb.data.empty()) {
-        ApplyRollingShutterImage(rgb.data, rgb.width, rgb.height, rgb.channels,
-                                 IntrinsicsOf(rgb.width, rgb.height, rgb_config_.horizontal_fov),
-                                 motion, readout, ref_depth);
+    const bool rolling = config_.rolling_shutter.enabled && readout > 0.0;
+    const auto& ex = config_.exposure;
+    const auto k = IntrinsicsOf(rgb.width, rgb.height, rgb_config_.horizontal_fov);
+    if (ex.enabled && !rgb.data.empty()) {
+        const double t_ref = ex.reference_rgb_exposure_us * 1e-6;
+        last_rgb_exposure_ = ex.auto_exposure
+            ? AutoExposure(ex.rgb_light_level, t_ref, ex.reference_gain, ex.min_exposure_us * 1e-6,
+                           ex.MaxExposureS(config_.rgb.fps), ex.max_gain)
+            : ManualExposure(ex.rgb_light_level, ex.rgb_exposure_us * 1e-6, ex.rgb_gain, t_ref, ex.reference_gain);
+        if (ex.motion_blur.enabled && HasMotion(motion)) {
+            // blur and rolling shutter together (the rows are exposed at their own times)
+            ApplyMotionBlurImage(rgb.data, rgb.width, rgb.height, rgb.channels, k, motion,
+                                 last_rgb_exposure_.exposure_s, rolling ? readout : 0.0,
+                                 ex.motion_blur.subframes, ref_depth);
+        } else if (rolling) {
+            ApplyRollingShutterImage(rgb.data, rgb.width, rgb.height, rgb.channels, k, motion, readout, ref_depth);
+        }
+        ApplyBrightnessAndGainNoise(rgb.data, last_rgb_exposure_.brightness,
+                                    ex.rgb_gain_noise_dn * GainNoiseScale(last_rgb_exposure_.gain, ex.reference_gain),
+                                    exposure_rng_);
+    } else if (rolling && !rgb.data.empty()) {
+        ApplyRollingShutterImage(rgb.data, rgb.width, rgb.height, rgb.channels, k, motion, readout, ref_depth);
     }
     if (!ApplyImageNoise(rgb, rgb_config_.noise, rgb_noise_rng_)) {
         ClearImageFrame(rgb);
@@ -299,13 +321,31 @@ bool RealSenseCameraSensor::RenderDepth(DepthFrame& depth_out, ImageFrame* rgb_o
         ClearDepthFrame(depth_out);
     } else {
         if (rgb_out) ideal_depth = depth_out.data;
-        // 1. rolling shutter (exposure) -> 2. edge effects -> 3. stereo matching -> 4. SDK filters
+        // 1. exposure: rolling shutter / motion blur -> 2. edge effects -> 3. stereo matching -> 4. SDK filters
         const double readout = config_.DepthReadoutS();
-        if (config_.rolling_shutter.enabled && readout > 0.0) {
-            ApplyRollingShutterDepth(depth_out.data, depth_out.width, depth_out.height,
-                                     IntrinsicsOf(depth_out.width, depth_out.height,
-                                                  depth_render_config_.horizontal_fov),
-                                     motion, readout);
+        const bool rolling = config_.rolling_shutter.enabled && readout > 0.0;
+        const auto kd = IntrinsicsOf(depth_out.width, depth_out.height, depth_render_config_.horizontal_fov);
+        const auto& ex = config_.exposure;
+        last_blur_stats_ = BlurStats {};
+        if (ex.enabled) {
+            if (!materials_resolved_) ResolveMaterials();
+            const double level = IrSceneLevel(depth_out.data, &raw.material_ids, materials_by_id_,
+                                              config_.texture_model.materials.default_material,
+                                              config_.texture_model.laser_power_mw, config_.texture_model.ambient_ir,
+                                              ex.ambient_gain);
+            const double t_ref = ex.reference_depth_exposure_us * 1e-6;
+            last_depth_exposure_ = ex.auto_exposure
+                ? AutoExposure(level, t_ref, ex.reference_gain, ex.min_exposure_us * 1e-6,
+                               ex.MaxExposureS(config_.depth.fps), ex.max_gain)
+                : ManualExposure(level, ex.depth_exposure_us * 1e-6, ex.depth_gain, t_ref, ex.reference_gain);
+        }
+        if (ex.enabled && ex.motion_blur.enabled && HasMotion(motion)) {
+            last_blur_stats_ = ApplyMotionBlurDepth(
+                depth_out.data, depth_out.width, depth_out.height, kd, motion, last_depth_exposure_.exposure_s,
+                rolling ? readout : 0.0, ex.motion_blur.subframes, depth_params_.fx_px * depth_params_.baseline_m,
+                ex.motion_blur.disparity_spread_px);
+        } else if (rolling) {
+            ApplyRollingShutterDepth(depth_out.data, depth_out.width, depth_out.height, kd, motion, readout);
         }
         last_edge_stats_ = EdgeEffectsStats {};
         if (edge_params_.occlusion || edge_params_.flying_pixels) {
@@ -336,6 +376,11 @@ bool RealSenseCameraSensor::RenderDepth(DepthFrame& depth_out, ImageFrame* rgb_o
             params.disparity_offset_px = thermal_.DisparityOffsetPx(raw.timestamp);
         }
         last_disparity_offset_px_ = params.disparity_offset_px;
+        if (ex.enabled) {
+            // higher gain / darker IR image -> noisier match
+            params.disparity_sigma_px *= GainNoiseScale(last_depth_exposure_.gain, ex.reference_gain)
+                / std::sqrt(std::clamp(last_depth_exposure_.brightness, 1e-3, 1.0));
+        }
         ApplyDepthModel(depth_out.data, depth_out.width, depth_out.height,
                         params, depth_rng_, &raw.material_ids, sigma_scale);
         int w = depth_out.width;

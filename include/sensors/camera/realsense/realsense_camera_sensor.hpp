@@ -8,6 +8,8 @@
 // Pipeline per capture:
 //   render (MuJoCo)
 //   -> rolling-shutter distortion  (rolling streams only, needs SetMotionSource)
+//      or motion blur + rolling     (realsense_exposure_model.hpp, optional: exposure /
+//                                   gain auto or manual, sub-frames over the exposure)
 //   -> depth-edge effects          (realsense_edge_effects.hpp, optional: occlusion
 //                                   shadow + flying pixels)
 //   -> weak-pattern holes          (realsense_texture_model.hpp, optional: material
@@ -89,6 +91,12 @@ namespace hako::robots::sensor::camera::realsense
         ThermalModel& GetThermalModel() { return thermal_; }
         void RunOnChipCalibration();                 // at the last capture time
         void RunOnChipCalibration(double sim_time);
+
+        // RS-5 exposure / gain of the last capture (exposure.enabled) and the depth
+        // pixels lost to motion blur.
+        const ExposureDecision& GetLastDepthExposure() const { return last_depth_exposure_; }
+        const ExposureDecision& GetLastRgbExposure() const { return last_rgb_exposure_; }
+        const BlurStats& GetLastBlurStats() const { return last_blur_stats_; }
         // IR material per MuJoCo material id (resolved at the first capture).
         const std::vector<IrMaterial>& GetResolvedMaterials() const { return materials_by_id_; }
         bool HasRgb() const { return config_.RgbEnabled(); }
@@ -136,6 +144,10 @@ namespace hako::robots::sensor::camera::realsense
         double last_capture_time_ {0.0};
         double last_temperature_c_ {0.0};
         double last_disparity_offset_px_ {0.0};
+        ExposureDecision last_depth_exposure_ {};
+        ExposureDecision last_rgb_exposure_ {};
+        BlurStats last_blur_stats_ {};
+        std::mt19937 exposure_rng_;
         std::mt19937 rgb_noise_rng_;
     };
 }

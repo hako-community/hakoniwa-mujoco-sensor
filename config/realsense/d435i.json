@@ -66,6 +66,22 @@
     "gyro_tco_dps_per_k": 0.015,
     "seed": 23
   },
+  "exposure": {
+    "enabled": false,
+    "auto": true,
+    "depth_exposure_us": 8500,
+    "depth_gain": 16,
+    "rgb_exposure_us": 10000,
+    "rgb_gain": 16,
+    "min_exposure_us": 100,
+    "max_exposure_us": null,
+    "max_gain": 248,
+    "ambient_gain": 10.0,
+    "rgb_light_level": 1.0,
+    "rgb_gain_noise_dn": 1.0,
+    "motion_blur": { "enabled": true, "subframes": 4, "disparity_spread_px": 1.0 },
+    "seed": 29
+  },
   "post_processing": {
     "enabled": false,
     "disparity_domain": true,

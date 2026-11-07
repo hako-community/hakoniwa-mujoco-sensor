@@ -19,6 +19,7 @@ MuJoCo 描画の上に**機種プロファイル＋ステレオ深度誤差モ�
 | `config/realsense/materials.json` | 材質表のサンプル（MuJoCo の material 名 → IR の性質） | |
 | `include/sensors/camera/realsense/realsense_specular_model.hpp` | 光沢面の白飛びと相互反射の鏡像（RS-3、既定 OFF） | なし（光線は外から渡す） |
 | `include/sensors/camera/realsense/realsense_thermal_model.hpp` | 温度ドリフト：暖機・外気温・自己校正、深度と IMU（RS-4、既定 OFF） | なし（純粋） |
+| `include/sensors/camera/realsense/realsense_exposure_model.hpp` | 露光・ゲイン（自動／手動）とモーションブラー（RS-5、既定 OFF） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_post_processing.hpp` | 後処理フィルター（間引き・閾値・空間・時間・穴埋め） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_imu_model.hpp` | IMU 誤差モデル（BMI055 / BMI085） | なし（純粋） |
 | `include/sensors/camera/realsense/realsense_config.hpp` | 設定構造体と JSON 読み込み・検証 | nlohmann のみ |
@@ -31,6 +32,7 @@ MuJoCo 描画の上に**機種プロファイル＋ステレオ深度誤差モ�
 | `tests/realsense_texture_model_test.cpp` | 材質表・穴・入射角・ノイズ倍率の単体テスト | 常にビルド |
 | `tests/realsense_specular_model_test.cpp` | 白飛び・鏡像の単体テスト（解析的な光線で代用） | 常にビルド |
 | `tests/realsense_thermal_model_test.cpp` | 温度・視差のずれ・自己校正・IMU のゼロ点の単体テスト | 常にビルド |
+| `tests/realsense_exposure_model_test.cpp` | 自動露光・ゲイン雑音・明るさ・ブラーの単体テスト | 常にビルド |
 | `tests/realsense_render_smoke.cpp` | 実描画のスモークテスト（壁・ポール・回転台） | カメラ ON + libmujoco + OpenGL |
 
 ## 情報源
@@ -278,6 +280,48 @@ IMU     ゼロ点 += TCO_軸 · (T − T_校正)   TCO_軸 は起動ごとに [�
 例（D435 848 px、既定値）: 冷えた状態で起動すると（25 °C、校正 40 °C、−0.075 px）、0.6 m で +1.2 mm、2 m で +13.5 mm 遠く読む。
 1 時間後（暖機済み）はほぼ 0。朝 15 °C → 昼 30 °C の工場では、暖機後でも −0.05 px（朝）〜 +0.025 px（昼）。
 
+## 露光・ゲインとモーションブラー（`exposure`、既定 OFF）
+
+### 露光・ゲイン
+
+描画は「明るさ 1 の場面を基準の露光（深度 8.5 ms、RGB 10 ms）・ゲイン 16 で撮った」画像とみなす。
+
+```
+必要な露光の積    E = t_基準 · g_基準 / L          （L: 場面の明るさ）
+自動露光          t = clamp(E / g_基準, t_最小, t_最大)   t_最大 = 1/fps（max_exposure_us で変更）
+                  g = clamp(E / t, g_基準, g_最大)       露光が上限に達したらゲインで補う
+明るさ            b = t · g · L / (t_基準 · g_基準)       1 = 適正、< 1 暗い、> 1 明るすぎ
+ゲインの雑音      √(g / g_基準) 倍（深度の視差ノイズと RGB の雑音）
+```
+
+- **深度（IR）の明るさ** L_IR = 有効画素の平均 ρ·(P/z² + ambient_gain·ambient_ir) / (0.8·(1 + 0.1·ambient_gain))。
+  屋内・白い壁・1 m・既定のプロジェクタで 1。ρ は材質表、P と ambient_ir は `texture_model` から取る。
+  暗いと（b < 1）視差ノイズを 1/√b 倍にする。
+- **RGB の明るさ**は `rgb_light_level`（1 = 描画が適正な明るさ）。b ≠ 1 なら画素値を b 倍して 0〜255 で切る。
+- 手動（`"auto": false`）では `depth_exposure_us`／`depth_gain`、`rgb_exposure_us`／`rgb_gain` をそのまま使う。
+- 撮影ごとの結果は `GetLastDepthExposure()`／`GetLastRgbExposure()`（露光時間・ゲイン・明るさ）。
+
+### モーションブラー
+
+ローリングシャッターと同じく、描画は 1 回だけで、カメラの動き（`SetMotionSource`／`SetCameraMotion`）から
+露光中の N 時刻（s_k = ((k + 0.5)/N − 0.5)·t）の姿勢に合わせて画像をずらす。ローリングの機種は行ごとの時刻も同時に入れる。
+
+- RGB: N 枚の平均。
+- 深度: 模様が流れると照合できないので、N 枚の視差のばらつきが `disparity_spread_px` を超えた画素は穴、それ以外は視差の平均。
+  段差の両側に幅 約 (N−1)/N·ω·t·fx px の穴の帯ができる。
+- **動いている物体はぶれない**（分かるのはカメラ自身の動きだけ）。
+- ずらした先が画面の外になる画素は、深度は穴、RGB は黒として平均する（画面の両端が暗くなる）。
+
+| 設定 | 既定 | 種類 |
+|---|---|---|
+| 基準の露光（`reference_depth_exposure_us`／`reference_rgb_exposure_us`） | 8.5 ms／10 ms | **仮定値**（librealsense の既定に近い値） |
+| `reference_gain`／`max_gain` | 16／248 | **仮定値** |
+| `min_exposure_us`／`max_exposure_us` | 100 µs／1/fps | 設定値 |
+| `ambient_gain` | 10 | **仮定値**（日光 ambient_ir 1.0 が 1 m のプロジェクタの 10 倍） |
+| `rgb_gain_noise_dn` | 1.0 DN（基準ゲイン） | **仮定値** |
+| `motion_blur.subframes` | 4 | 速度と細かさの釣り合い |
+| `motion_blur.disparity_spread_px` | 1.0 px | **仮定値** |
+
 ## 後処理フィルター（librealsense 相当、既定 OFF）
 
 順序: 間引き → 閾値 → 視差へ変換 → 空間 → 時間 → 深度へ戻す → 穴埋め。
@@ -359,14 +403,15 @@ if (cam.ShouldUpdate(dt)) {
 
 ## モデルに入れていないもの
 
-露光・ゲイン、モーションブラー、IMU とカメラ間の時刻ずれ。温度ドリフトは `thermal` で入れた。
+IMU とカメラ間の時刻ずれ（RS-6 で予定）、動いている物体のブラー。
+温度ドリフトは `thermal`、露光・ゲインとカメラの動きによるブラーは `exposure` で入れた。
 （深度の境界の飛び点と隠れ領域は `edge_effects`、模様の見えない所の穴は `texture_model`、
 光沢面の白飛びと相互反射は `specular_model` で入れた。ToF 型のマルチパスは扱わない。）
 
 ## テスト
 
 ```bash
-ctest --test-dir build -R "realsense_(depth_model|effects|edge_effects|texture_model|specular_model|thermal_model)_test" --output-on-failure
+ctest --test-dir build -R "realsense_(depth_model|effects|edge_effects|texture_model|specular_model|thermal_model|exposure_model)_test" --output-on-failure
 # 実描画（-DHAKO_SENSOR_BUILD_CAMERA=ON と MUJOCO_LIBRARY が必要）
 ctest --test-dir build -R realsense_render_smoke --output-on-failure
 ```
@@ -400,3 +445,9 @@ IMU のジャイロ真値 −5.000 rad/s・加速度真値 −9.81 m/s²（光�
 処理時間の再計測（2026-11-07）は、別のプロセスで CPU 使用率が 97〜100% のままで普段の値は取れていない。
 同じ条件の比較では、飛び点・影 18〜21 ms、材質の穴 19〜25 ms、鏡面（光線を除く）51〜62 ms で、
 鏡面は飛び点・影の約 2.7 倍（空いているときの飛び点・影 7.6 ms から、鏡面は普段 20 ms 前後と見込む）。
+
+2026-11-07（RS-5 追加後）: 単体テスト 7 本（132／58／37／47／30／36／41）、実描画 102/102 すべて合格。
+主な実測（D435、0.6 m の箱と 1.0 m の壁、カメラが 3 rad/s で回転）: 深度の穴の帯 露光 2 ms で 4 px（式 4.0 px）、
+10 ms で 20 px（式 20.1 px）。RGB（1280×720）の中央の行の中間調の画素 静止 2 → 回転 67。
+暗い RGB（明るさ 0.2）の自動露光は 33.3 ms・ゲイン 24.0、深度は箱が近く明るいので 8.11 ms。
+深度のブラー（848×480、4 枚）は 70.6 ms／フレーム（CPU が混んでいる状態。飛び点・影が 17 ms に出る条件）。

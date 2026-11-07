@@ -23,7 +23,11 @@
 //     behind the plate at z * (range + t) / range; specular model off is bit-identical,
 //   - RS-4: a cold start makes the 2 m wall read ~1.3 cm farther (disparity offset
 //     -0.075 px), the warm camera reads true, the on-chip calibration removes the
-//     cold offset, and the IMU at rest reads its thermal zero-offset drift.
+//     cold offset, and the IMU at rest reads its thermal zero-offset drift,
+//   - RS-5: the box scene with the camera yawing at 3 rad/s: depth loses a band of
+//     ~(N-1)/N * w*t*fx px at each box edge (wider for a longer exposure), the RGB
+//     edges smear, auto exposure lengthens the exposure / raises the gain in a dark
+//     scene, and exposure off is bit-identical (depth and RGB).
 
 #include <algorithm>
 #include <chrono>
@@ -723,6 +727,114 @@ int main()
         imu.Update(0.0101, accel, gyro);
         close_to(gyro.back().value.x, 0.0, 1e-9, "IMU calibration removes the drift");
         d->time = 0.0;
+    }
+
+    std::printf("[RS-5 D435 exposure / motion blur: box scene, camera yaw 3 rad/s]\n");
+    {
+        rs::CameraMotion yaw {};
+        yaw.wy = 3.0;   // optical y = vertical axis
+        const auto band = [](const cam::DepthFrame& f) {
+            int n = 0;
+            for (int x = 300; x < 560; ++x) n += std::isfinite(f.data[240 * static_cast<std::size_t>(f.width) + x]) ? 0 : 1;
+            return n;
+        };
+        rs::RealSenseConfig c {};
+        rs::MakeDefaultConfig("D435", c);
+        c.depth_model.enabled = false;
+        c.exposure.enabled = true;
+        c.exposure.auto_exposure = false;
+        rs::RealSenseCameraSensor sensor(renderer, "rs_edge");
+        cam::DepthFrame depth;
+        check(sensor.LoadConfig(c), "LoadConfig (exposure)");
+        sensor.CaptureDepth(depth);
+        const int still = band(depth);   // left occlusion-free: depth model off -> only the box itself
+        sensor.SetCameraMotion(yaw);
+        int bands[2] = {0, 0};
+        const double times[2] = {0.002, 0.010};
+        for (int i = 0; i < 2; ++i) {
+            c.exposure.depth_exposure_us = times[i] * 1e6;
+            check(sensor.LoadConfig(c), "LoadConfig (manual exposure)");
+            sensor.CaptureDepth(depth);
+            bands[i] = band(depth) - still;
+        }
+        const double fx = sensor.GetDepthModelParams().fx_px;
+        const double want2 = 2.0 * 0.75 * rs::ExpectedBlurPx(3.0, 0.002, fx);
+        const double want10 = 2.0 * 0.75 * rs::ExpectedBlurPx(3.0, 0.010, fx);
+        std::printf("  depth holes from blur: 2 ms %d px (want %.1f), 10 ms %d px (want %.1f)\n", bands[0], want2,
+                    bands[1], want10);
+        close_to(bands[0], want2, 3.0, "2 ms exposure: narrow smear band");
+        close_to(bands[1], want10, 4.0, "10 ms exposure: band ~ 2 x (N-1)/N x w t fx");
+        check(sensor.GetLastBlurStats().smeared > 0, "blur stats");
+
+        // RGB (separate 1280x720 render, rolling): edges smear with the exposure.
+        const auto transitions = [](const cam::ImageFrame& f) {
+            const int row = f.height / 2;
+            int lo = 255, hi = 0;
+            std::vector<int> luma(static_cast<std::size_t>(f.width));
+            for (int x = 0; x < f.width; ++x) {
+                const std::uint8_t* p = &f.data[(static_cast<std::size_t>(row) * f.width + x) * 3];
+                luma[static_cast<std::size_t>(x)] = (299 * p[0] + 587 * p[1] + 114 * p[2]) / 1000;
+                lo = std::min(lo, luma[static_cast<std::size_t>(x)]);
+                hi = std::max(hi, luma[static_cast<std::size_t>(x)]);
+            }
+            int n = 0;
+            const int a = lo + (hi - lo) / 5, b = hi - (hi - lo) / 5;
+            for (int v : luma) n += (v > a && v < b) ? 1 : 0;
+            return n;
+        };
+        rs::RealSenseConfig cr {};
+        rs::MakeDefaultConfig("D435", cr);
+        cr.exposure.enabled = true;
+        cr.exposure.auto_exposure = false;
+        cr.exposure.rgb_gain_noise_dn = 0.0;
+        cr.exposure.motion_blur.subframes = 8;
+        rs::RealSenseCameraSensor rgb_sensor(renderer, "rs_edge");
+        check(rgb_sensor.LoadConfig(cr), "LoadConfig (RGB exposure)");
+        cam::ImageFrame rgb;
+        rgb_sensor.Capture(rgb, depth);
+        const int t_still = transitions(rgb);
+        rgb_sensor.SetCameraMotion(yaw);
+        rgb_sensor.Capture(rgb, depth);
+        const int t_blur = transitions(rgb);
+        const double fx_rgb = rgb_sensor.GetRgbCameraConfig().intrinsics.fx;
+        std::printf("  RGB transition pixels in the middle row: still %d, blurred %d (blur %.1f px)\n", t_still, t_blur,
+                    rs::ExpectedBlurPx(3.0, 0.010, fx_rgb));
+        check(t_blur > t_still + 15, "RGB edges smear under motion");
+
+        // Auto exposure: dark RGB scene -> exposure capped at 1/fps, gain up.
+        cr.exposure.auto_exposure = true;
+        cr.exposure.rgb_light_level = 0.2;
+        check(rgb_sensor.LoadConfig(cr), "LoadConfig (auto, dark)");
+        rgb_sensor.Capture(rgb, depth);
+        const auto& re = rgb_sensor.GetLastRgbExposure();
+        std::printf("  auto exposure dark RGB: %.1f ms, gain %.1f, brightness %.2f; depth %.2f ms\n",
+                    re.exposure_s * 1e3, re.gain, re.brightness, rgb_sensor.GetLastDepthExposure().exposure_s * 1e3);
+        close_to(re.exposure_s, 1.0 / 30.0, 1e-9, "dark scene: exposure 1/fps");
+        close_to(re.gain, 16.0 * (0.010 / 0.2) / (1.0 / 30.0), 1e-6, "dark scene: gain raised");
+        check(rgb_sensor.GetLastDepthExposure().exposure_s < 0.0085,
+              "depth auto exposure: box at 0.6 m is bright -> shorter than 8.5 ms");
+
+        // Exposure off (motion set): bit-identical to the plain config, depth and RGB.
+        rs::RealSenseConfig plain {};
+        rs::MakeDefaultConfig("D435", plain);
+        rs::RealSenseConfig off = cr;
+        off.exposure.enabled = false;
+        rs::RealSenseCameraSensor sp(renderer, "rs_edge");
+        rs::RealSenseCameraSensor so(renderer, "rs_edge");
+        check(sp.LoadConfig(plain) && so.LoadConfig(off), "LoadConfig (regression pair)");
+        sp.SetCameraMotion(yaw);
+        so.SetCameraMotion(yaw);
+        cam::ImageFrame rp;
+        cam::ImageFrame ro;
+        cam::DepthFrame dp;
+        cam::DepthFrame dof;
+        sp.Capture(rp, dp);
+        so.Capture(ro, dof);
+        bool same = dp.data.size() == dof.data.size() && rp.data == ro.data;
+        for (std::size_t i = 0; same && i < dp.data.size(); ++i) {
+            same = (std::isnan(dp.data[i]) && std::isnan(dof.data[i])) || dp.data[i] == dof.data[i];
+        }
+        check(same, "exposure off -> bit-identical depth and RGB");
     }
 
     std::printf("realsense_render_smoke: %d/%d checks passed\n", g_checks - g_failures, g_checks);

@@ -29,6 +29,11 @@
 //                "steady_rise_k": 15, "time_constant_s": 600, "start_warm": false,
 //                "calibration_temp_c": null, "disparity_coeff_px_per_k": 0.005,
 //                "accel_tco_mg_per_k": 1.0, "gyro_tco_dps_per_k": 0.015, "seed": 0 },
+//   "exposure": { "enabled": false, "auto": true, "depth_exposure_us": 8500, "depth_gain": 16,
+//                 "rgb_exposure_us": 10000, "rgb_gain": 16, "max_exposure_us": null, "max_gain": 248,
+//                 "rgb_light_level": 1.0, "rgb_gain_noise_dn": 1.0,
+//                 "motion_blur": { "enabled": true, "subframes": 4, "disparity_spread_px": 1.0 },
+//                 "seed": 0 },
 //   "post_processing": { "enabled": false, "decimation": {...}, "threshold": {...},
 //                        "spatial": {...}, "temporal": {...}, "hole_filling": {...} },
 //   "imu": { "enabled": true, "accel_rate_hz": 250, "gyro_rate_hz": 400,
@@ -48,6 +53,7 @@
 
 #include "sensors/camera/realsense/realsense_depth_model.hpp"
 #include "sensors/camera/realsense/realsense_edge_effects.hpp"
+#include "sensors/camera/realsense/realsense_exposure_model.hpp"
 #include "sensors/camera/realsense/realsense_imu_model.hpp"
 #include "sensors/camera/realsense/realsense_post_processing.hpp"
 #include "sensors/camera/realsense/realsense_profile.hpp"
@@ -160,6 +166,42 @@ namespace hako::robots::sensor::camera::realsense
         ThermalParams params {};   // laser_power_mw is taken from texture_model
     };
 
+    // RS-5: exposure / gain (auto or manual) and motion blur (default off).
+    // Reference exposures (the rendering is correctly exposed there, gain 16):
+    // depth 8.5 ms, RGB 10 ms. All values are assumptions.
+    struct MotionBlurConfig
+    {
+        bool enabled {true};
+        int subframes {4};
+        double disparity_spread_px {1.0};
+    };
+
+    struct ExposureConfig
+    {
+        bool enabled {false};
+        bool auto_exposure {true};
+        double depth_exposure_us {8500.0};   // manual value (auto: ignored)
+        double depth_gain {16.0};
+        double rgb_exposure_us {10000.0};
+        double rgb_gain {16.0};
+        double reference_depth_exposure_us {8500.0};
+        double reference_rgb_exposure_us {10000.0};
+        double reference_gain {16.0};
+        double min_exposure_us {100.0};
+        double max_exposure_us {-1.0};       // < 0: 1 / fps
+        double max_gain {248.0};
+        double ambient_gain {10.0};          // IR level: weight of ambient_ir against the projector
+        double rgb_light_level {1.0};        // 1 = rendering correctly exposed at the reference
+        double rgb_gain_noise_dn {1.0};      // RGB noise sigma [DN] at the reference gain
+        MotionBlurConfig motion_blur {};
+        std::uint32_t seed {0};
+
+        double MaxExposureS(double fps) const
+        {
+            return max_exposure_us > 0.0 ? max_exposure_us * 1e-6 : 1.0 / std::max(fps, 1e-3);
+        }
+    };
+
     struct RealSenseConfig
     {
         RealSenseProfile profile {};     // built-in profile with overrides applied
@@ -173,6 +215,7 @@ namespace hako::robots::sensor::camera::realsense
         TextureModelConfig texture_model {};
         SpecularModelConfig specular_model {};
         ThermalConfig thermal {};
+        ExposureConfig exposure {};
         PostProcessingConfig post_processing {};
         ImuModelConfig imu {};
 
@@ -365,6 +408,13 @@ namespace hako::robots::sensor::camera::realsense
         if (th.steady_rise_k < 0.0 || th.time_constant_s < 0.0 || th.laser_share < 0.0 || th.laser_share > 1.0
             || th.accel_tco_mg_per_k < 0.0 || th.gyro_tco_dps_per_k < 0.0)
             return "invalid thermal";
+        const auto& ex = c.exposure;
+        if (ex.depth_exposure_us <= 0.0 || ex.rgb_exposure_us <= 0.0 || ex.depth_gain <= 0.0 || ex.rgb_gain <= 0.0
+            || ex.reference_depth_exposure_us <= 0.0 || ex.reference_rgb_exposure_us <= 0.0 || ex.reference_gain <= 0.0
+            || ex.min_exposure_us <= 0.0 || ex.max_gain < ex.reference_gain || ex.ambient_gain < 0.0
+            || ex.rgb_light_level < 0.0 || ex.rgb_gain_noise_dn < 0.0
+            || ex.motion_blur.subframes < 1 || ex.motion_blur.subframes > 64 || ex.motion_blur.disparity_spread_px <= 0.0)
+            return "invalid exposure";
         if (c.ImuEnabled()) {
             if (c.imu.accel_rate_hz <= 0.0 || c.imu.gyro_rate_hz <= 0.0) return "invalid imu rate";
             if (c.imu.bias_mode != "none" && c.imu.bias_mode != "calibrated" && c.imu.bias_mode != "uncalibrated")
@@ -642,6 +692,32 @@ namespace hako::robots::sensor::camera::realsense
                         }
                         tp.ambient_schedule.emplace_back(e.at(0).get<double>(), e.at(1).get<double>());
                     }
+                }
+            }
+            if (root.contains("exposure") && root.at("exposure").is_object()) {
+                const auto& t = root.at("exposure");
+                auto& ex = c.exposure;
+                detail::ReadIf(t, "enabled", ex.enabled);
+                detail::ReadIf(t, "auto", ex.auto_exposure);
+                detail::ReadIf(t, "depth_exposure_us", ex.depth_exposure_us);
+                detail::ReadIf(t, "depth_gain", ex.depth_gain);
+                detail::ReadIf(t, "rgb_exposure_us", ex.rgb_exposure_us);
+                detail::ReadIf(t, "rgb_gain", ex.rgb_gain);
+                detail::ReadIf(t, "reference_depth_exposure_us", ex.reference_depth_exposure_us);
+                detail::ReadIf(t, "reference_rgb_exposure_us", ex.reference_rgb_exposure_us);
+                detail::ReadIf(t, "reference_gain", ex.reference_gain);
+                detail::ReadIf(t, "min_exposure_us", ex.min_exposure_us);
+                detail::ReadIf(t, "max_exposure_us", ex.max_exposure_us);
+                detail::ReadIf(t, "max_gain", ex.max_gain);
+                detail::ReadIf(t, "ambient_gain", ex.ambient_gain);
+                detail::ReadIf(t, "rgb_light_level", ex.rgb_light_level);
+                detail::ReadIf(t, "rgb_gain_noise_dn", ex.rgb_gain_noise_dn);
+                detail::ReadIf(t, "seed", ex.seed);
+                if (t.contains("motion_blur") && t.at("motion_blur").is_object()) {
+                    const auto& b = t.at("motion_blur");
+                    detail::ReadIf(b, "enabled", ex.motion_blur.enabled);
+                    detail::ReadIf(b, "subframes", ex.motion_blur.subframes);
+                    detail::ReadIf(b, "disparity_spread_px", ex.motion_blur.disparity_spread_px);
                 }
             }
             if (root.contains("post_processing") && root.at("post_processing").is_object()) {

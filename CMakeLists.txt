@@ -328,6 +328,16 @@ if(HAKO_SENSOR_BUILD_TESTS)
     endif()
     add_test(NAME realsense_thermal_model_test COMMAND realsense_thermal_model_test)
 
+    # RealSense exposure / gain and motion blur (pure).
+    add_executable(realsense_exposure_model_test tests/realsense_exposure_model_test.cpp)
+    target_compile_features(realsense_exposure_model_test PRIVATE cxx_std_20)
+    target_include_directories(realsense_exposure_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(realsense_exposure_model_test SYSTEM PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+    if(MSVC)
+        target_compile_options(realsense_exposure_model_test PRIVATE /utf-8)
+    endif()
+    add_test(NAME realsense_exposure_model_test COMMAND realsense_exposure_model_test)
+
     # Scan timestamps across the range sensors + their PDU headers.
     # Needs the PDU type headers (it asserts on the converted messages).
     if(EXISTS "${HAKO_PDU_TYPES_INCLUDE_DIR}/builtin_interfaces")
