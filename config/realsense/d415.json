@@ -1,0 +1,8 @@
+{
+  "model": "D415",
+  "frame_id": "camera",
+  "depth": { "width": 1280, "height": 720, "fps": 30, "format": "DEPTH_F32_M" },
+  "rgb": { "enabled": true, "width": 1280, "height": 720, "fps": 30, "format": "R8G8B8" },
+  "depth_model": { "enabled": true, "seed": 7 },
+  "rolling_shutter": { "enabled": true, "depth_readout_s": 0.025, "rgb_readout_s": 0.025 }
+}

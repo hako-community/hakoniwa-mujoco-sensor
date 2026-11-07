@@ -135,6 +135,7 @@ Godot からの使用例は `examples/godot/`（**サンプル止まり**、godo
 | `contact` | `std_msgs/Bool` + 接触力 | MJCF の `touch` センサ |
 | `force_torque` | `geometry_msgs/WrenchStamped` | |
 | `camera`（RGBD） | `sensor_msgs/{Image,CameraInfo}` | `HAKO_SENSOR_BUILD_CAMERA=ON` のときのみ（GLFW/OpenGL 依存） |
+| `realsense`（RealSense D400/D500） | `sensor_msgs/{Image,CameraInfo}` | 14 機種のプロファイル + ステレオ深度誤差 + ローリングシャッター + 後処理フィルター。IMU（`sensor_msgs/Imu`）も別センサーで提供。カメラ部はカメラ ON のときのみ。詳細は [`docs/physical_ai/realsense_camera.md`](./docs/physical_ai/realsense_camera.md) |
 | `battery` | `hako_msgs/HakoBatteryStatus` | 関節トルク由来の電流積算 + 放電曲線 |
 | `lidar` / `ultrasonic` / `radar` | 距離・点群 | `IRayCaster` 抽象越し（MuJoCo / Godot 両対応） |
 

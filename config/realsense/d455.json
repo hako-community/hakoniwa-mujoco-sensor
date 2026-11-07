@@ -1,0 +1,7 @@
+{
+  "model": "D455",
+  "frame_id": "camera",
+  "depth": { "width": 848, "height": 480, "fps": 30, "format": "DEPTH_F32_M" },
+  "rgb": { "enabled": true, "width": 1280, "height": 800, "fps": 30, "format": "R8G8B8" },
+  "depth_model": { "enabled": true, "seed": 7 }
+}

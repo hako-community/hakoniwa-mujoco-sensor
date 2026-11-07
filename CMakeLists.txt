@@ -148,12 +148,14 @@ if(HAKO_SENSOR_BUILD_CAMERA)
         src/sensors/camera/stereo_camera_sensor.cpp
         src/sensors/camera/mujoco_camera_renderer.cpp
         src/sensors/camera/image_frame_writer.cpp
+        src/sensors/camera/realsense_camera_sensor.cpp
     )
 endif()
 
 add_library(hako_mujoco_sensor STATIC
     ${_camera_srcs}
     src/sensors/backend/mujoco_ray_caster.cpp
+    src/sensors/camera/realsense_imu_sensor.cpp
     src/sensors/radar/radar_sensor.cpp
     src/sensors/lidar/lidar_2d_sensor.cpp
     src/sensors/lidar/lidar_scan_sensor.cpp
@@ -261,6 +263,28 @@ if(HAKO_SENSOR_BUILD_TESTS)
         target_compile_options(range_fidelity_test PRIVATE /utf-8)
     endif()
     add_test(NAME range_fidelity_test COMMAND range_fidelity_test)
+
+    # RealSense profile table + stereo depth model + JSON config (pure: no MuJoCo/GL).
+    add_executable(realsense_depth_model_test tests/realsense_depth_model_test.cpp)
+    target_compile_features(realsense_depth_model_test PRIVATE cxx_std_20)
+    target_include_directories(realsense_depth_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(realsense_depth_model_test SYSTEM PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+    target_compile_definitions(realsense_depth_model_test PRIVATE
+        HAKO_SENSOR_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    if(MSVC)
+        target_compile_options(realsense_depth_model_test PRIVATE /utf-8)
+    endif()
+    add_test(NAME realsense_depth_model_test COMMAND realsense_depth_model_test)
+
+    # RealSense post-processing filters, rolling shutter and IMU noise model (pure).
+    add_executable(realsense_effects_test tests/realsense_effects_test.cpp)
+    target_compile_features(realsense_effects_test PRIVATE cxx_std_20)
+    target_include_directories(realsense_effects_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(realsense_effects_test SYSTEM PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+    if(MSVC)
+        target_compile_options(realsense_effects_test PRIVATE /utf-8)
+    endif()
+    add_test(NAME realsense_effects_test COMMAND realsense_effects_test)
 
     # Scan timestamps across the range sensors + their PDU headers.
     # Needs the PDU type headers (it asserts on the converted messages).
@@ -405,6 +429,19 @@ if(HAKO_SENSOR_BUILD_TESTS)
             ${MUJOCO_INCLUDE_DIR} ${NLOHMANN_JSON_INCLUDE_DIR})
         target_link_libraries(mujoco_radar_integration_test PRIVATE ${MUJOCO_LIBRARY})
         add_test(NAME mujoco_radar_integration_test COMMAND mujoco_radar_integration_test)
+
+        # RealSense camera on the real MuJoCo renderer (needs an OpenGL context).
+        if(HAKO_SENSOR_BUILD_CAMERA)
+            add_executable(realsense_render_smoke tests/realsense_render_smoke.cpp)
+            target_compile_features(realsense_render_smoke PRIVATE cxx_std_20)
+            target_compile_definitions(realsense_render_smoke PRIVATE
+                HAKO_SENSOR_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+            if(MSVC)
+                target_compile_options(realsense_render_smoke PRIVATE /utf-8)
+            endif()
+            target_link_libraries(realsense_render_smoke PRIVATE hako_mujoco_sensor ${MUJOCO_LIBRARY})
+            add_test(NAME realsense_render_smoke COMMAND realsense_render_smoke)
+        endif()
 
         # M2 A-2 LiDAR demo: sense a simenv-data generated world (env.xml).
         add_executable(lidar_envsim_demo

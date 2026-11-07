@@ -1,0 +1,44 @@
+{
+  "model": "D435i",
+  "frame_id": "camera",
+  "depth": { "width": 848, "height": 480, "fps": 30, "format": "DEPTH_F32_M" },
+  "rgb": {
+    "enabled": true, "width": 1280, "height": 720, "fps": 30, "format": "R8G8B8",
+    "noise": { "type": "gaussian", "mean": 0.0, "stddev": 2.0, "seed": 1 }
+  },
+  "depth_model": {
+    "enabled": true,
+    "noise_model": "typical",
+    "noise_scale": 1.0,
+    "min_z_mode": "disparity",
+    "disparity_shift_px": 0,
+    "left_invalid_band": true,
+    "subpixel_step_px": 0.0,
+    "depth_unit_m": 0.001,
+    "invalid_probability": 0.0,
+    "invalid_material_ids": [],
+    "material_invalid_probability": 1.0,
+    "seed": 7
+  },
+  "rolling_shutter": { "enabled": true },
+  "post_processing": {
+    "enabled": false,
+    "disparity_domain": true,
+    "decimation": { "enabled": true, "magnitude": 2 },
+    "threshold": { "enabled": false, "min_m": 0.1, "max_m": 4.0 },
+    "spatial": { "enabled": true, "iterations": 2, "alpha": 0.5, "delta": 20, "holes_fill": 0 },
+    "temporal": { "enabled": true, "alpha": 0.4, "delta": 20, "persistency": 3 },
+    "hole_filling": { "enabled": false, "mode": 1 }
+  },
+  "imu": {
+    "enabled": true,
+    "accel_rate_hz": 250,
+    "gyro_rate_hz": 400,
+    "bias_mode": "calibrated",
+    "noise_scale": 1.0,
+    "quantize": true,
+    "saturate": true,
+    "bias_random_walk": false,
+    "seed": 11
+  }
+}
