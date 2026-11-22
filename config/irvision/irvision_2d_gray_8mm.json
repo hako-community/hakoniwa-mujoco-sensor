@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "frame_id": "irvision_optical",
+    "update_rate": 10.0,
+    "horizontal_fov": 0.8457078522658813,
+    "image": { "width": 1280, "height": 1024, "format": "L8" },
+    "clip": { "near": 0.03, "far": 3.0 },
+    "intrinsics": { "fx": 1422.2222222222222, "fy": 1422.2222222222222, "cx": 640.0, "cy": 512.0 }
+  },
+  "mjcf_binding": { "camera_name": "irvision_cam" },
+  "irvision": {
+    "model": "FANUC iRVision 2D",
+    "image_type": "grayscale",
+    "focal_length_mm": 8.0,
+    "pixel_pitch_um": 5.625,
+    "sensor_size_mm": [7.2, 5.76],
+    "vertical_fov": 0.6911111611634243,
+    "led": { "color": "red", "rgb": [1.0, 0.08, 0.02] },
+    "housing_mm": { "width": 80.0, "height": 74.0, "length": 131.8 },
+    "mass_kg": 0.6,
+    "mjcf": "irvision_2d.xml",
+    "note": "グレースケール・8 mm・赤色 LED。値は include/sensors/camera/irvision/irvision_profile.hpp の MakeProfile(Grayscale, 8, Red) と一致させる（tests/irvision_profile_test.cpp で確認）。画素ピッチ 5.625 µm・更新周期 10 Hz は推定"
+  }
+}

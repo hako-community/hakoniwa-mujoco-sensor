@@ -347,6 +347,19 @@ if(HAKO_SENSOR_BUILD_TESTS)
     endif()
     add_test(NAME realsense_imu_timing_test COMMAND realsense_imu_timing_test)
 
+    # FANUC iRVision 2D camera profile (pure): optics, catalog, and that the
+    # shipped JSON config and MJCF model agree with the profile.
+    add_executable(irvision_profile_test tests/irvision_profile_test.cpp)
+    target_compile_features(irvision_profile_test PRIVATE cxx_std_20)
+    target_include_directories(irvision_profile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(irvision_profile_test SYSTEM PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+    target_compile_definitions(irvision_profile_test PRIVATE
+        IRVISION_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config/irvision")
+    if(MSVC)
+        target_compile_options(irvision_profile_test PRIVATE /utf-8)
+    endif()
+    add_test(NAME irvision_profile_test COMMAND irvision_profile_test)
+
     # Scan timestamps across the range sensors + their PDU headers.
     # Needs the PDU type headers (it asserts on the converted messages).
     if(EXISTS "${HAKO_PDU_TYPES_INCLUDE_DIR}/builtin_interfaces")
@@ -413,6 +426,24 @@ if(HAKO_SENSOR_BUILD_TESTS)
                          ${CMAKE_CURRENT_SOURCE_DIR}/drone_daasim/radar_fit_test.py)
     else()
         message(STATUS "no Python3 interpreter -- skipping radar_fit_test")
+    endif()
+
+    # iRVision 2D: render the MJCF camera in MuJoCo and check the field of view
+    # against the JSON config. Needs the mujoco Python package (3.9.0) and an
+    # offscreen GL context (EGL on headless Linux), so it is registered only
+    # when `import mujoco` works with that interpreter.
+    if(Python3_Interpreter_FOUND)
+        execute_process(COMMAND ${Python3_EXECUTABLE} -c "import mujoco, numpy"
+                        RESULT_VARIABLE _irv_mujoco_py OUTPUT_QUIET ERROR_QUIET)
+        if(_irv_mujoco_py EQUAL 0)
+            add_test(NAME irvision_fov_render_test COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_CURRENT_SOURCE_DIR}/tools/irvision_check_fov.py)
+            if(UNIX AND NOT APPLE)
+                set_tests_properties(irvision_fov_render_test PROPERTIES ENVIRONMENT "MUJOCO_GL=egl")
+            endif()
+        else()
+            message(STATUS "no mujoco Python package -- skipping irvision_fov_render_test")
+        endif()
     endif()
 
     # C-ABI smoke: dummy ray caster -> both lidar3d and radar return points.

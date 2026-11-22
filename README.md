@@ -136,6 +136,7 @@ Godot からの使用例は `examples/godot/`（**サンプル止まり**、godo
 | `force_torque` | `geometry_msgs/WrenchStamped` | |
 | `camera`（RGBD） | `sensor_msgs/{Image,CameraInfo}` | `HAKO_SENSOR_BUILD_CAMERA=ON` のときのみ（GLFW/OpenGL 依存） |
 | `realsense`（RealSense D400/D500） | `sensor_msgs/{Image,CameraInfo}` | 14 機種のプロファイル + ステレオ深度誤差 + ローリングシャッター + 後処理フィルター。任意で 飛び点・影、材質表と穴、光沢面の白飛び・鏡像、温度ドリフト、露光・ゲイン・ブラー、IMU とフレームの時刻・取り付け誤差（すべて既定 OFF）。IMU（`sensor_msgs/Imu`）も別センサーで提供。バラ積みの見本場面と評価あり（`examples/realsense_binpicking`）。カメラ部はカメラ ON のときのみ。詳細は [`docs/physical_ai/realsense_camera.md`](./docs/physical_ai/realsense_camera.md) |
+| `irvision`（FANUC iRVision 2D） | `sensor_msgs/Image`（既存の `CameraSensor`、`L8`） | ロボット手首の 2D ビジョンカメラ。機種プロファイル（グレースケール 1280×1024／カラー 640×512、レンズ 8〜25 mm、LED 赤・白・なし、外形 80×131.8×74 mm）、設定 JSON、MJCF のカメラモデル（本体・赤色 LED のスポットライト）。描画で画角を確認する試験あり。詳細は [`docs/physical_ai/irvision_2d_camera.md`](./docs/physical_ai/irvision_2d_camera.md) |
 | `battery` | `hako_msgs/HakoBatteryStatus` | 関節トルク由来の電流積算 + 放電曲線 |
 | `lidar` / `ultrasonic` / `radar` | 距離・点群 | `IRayCaster` 抽象越し（MuJoCo / Godot 両対応） |
 

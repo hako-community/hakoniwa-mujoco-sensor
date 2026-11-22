@@ -1,0 +1,57 @@
+<!--
+  FANUC iRVision 2D カメラ（グレースケール・8 mm・赤色 LED）の MJCF モデル。
+  ロボットのセルへは mjSpec の attach（hakoniwa-cobot の gen_cell と同じ方法）で取り込む。
+
+  座標（本体 irvision_2d の座標系）:
+    原点 = 前面の窓の中心（光学中心はここに置く）
+    +x   = 光軸の向き（前）。本体は x = -0.1318 〜 0 に伸びる
+    +y   = 左、+z = 上（前面の窓は y 方向 80 mm × z 方向 74 mm）
+  MuJoCo のカメラは自分の -z を見るので、xyaxes="0 -1 0 0 0 1"（画像の右 = -y、上 = +z）で +x を向かせる。
+
+  光学は焦点距離と撮像素子の大きさで与える（fovy は使わない）:
+    focal 8 mm、sensorsize 7.2 × 5.76 mm、resolution 1280 × 1024
+    → 横 48.46°、縦 39.60°（config/irvision/irvision_2d_gray_8mm.json と一致）
+  外形 80 × 131.8 × 74 mm、0.6 kg は FANUC 公式。中の部品の形は写真からの近似。
+-->
+<mujoco model="irvision_2d">
+  <compiler angle="radian"/>
+  <!-- 1280 × 1024 を描くための画面外バッファ。attach で取り込むとこの設定は引き継がれないので、
+       取り込む側（セルの MJCF）でも offwidth ≥ 1280・offheight ≥ 1024 にすること -->
+  <visual>
+    <global offwidth="1280" offheight="1024"/>
+  </visual>
+  <asset>
+    <material name="irv_housing" rgba="0.08 0.08 0.09 1" specular="0.3" shininess="0.4"/>
+    <material name="irv_label" rgba="0.75 0.75 0.72 1"/>
+    <material name="irv_window" rgba="0.15 0.2 0.25 0.35" specular="0.9" shininess="0.9"/>
+    <material name="irv_lens" rgba="0.02 0.02 0.02 1" specular="0.8" shininess="0.8"/>
+    <material name="irv_led" rgba="1.0 0.08 0.02 1" emission="0.8"/>
+  </asset>
+  <worldbody>
+    <body name="irvision_2d">
+      <inertial pos="-0.0659 0 0" mass="0.6" diaginertia="0.000594 0.001142 0.001189"/>
+      <!-- 本体（外形 80 × 131.8 × 74 mm）。前面の 2 mm は窓・レンズ・LED の層として空けておく -->
+      <geom name="irv_body" type="box" pos="-0.0669 0 0" size="0.0649 0.040 0.037" material="irv_housing"/>
+      <!-- 側面の銘板（見た目だけ） -->
+      <geom name="irv_label" type="box" pos="-0.075 0.0402 0" size="0.035 0.0002 0.020" material="irv_label"
+            contype="0" conaffinity="0"/>
+      <!-- 前面の層（見た目だけ）: レンズ x -2.0〜-1.5 mm、保護窓 -1.5〜-1.0 mm、LED -1.0〜-0.4 mm -->
+      <geom name="irv_lens" type="cylinder" pos="-0.00175 0 0" quat="0.7071068 0 0.7071068 0" size="0.012 0.00025"
+            material="irv_lens" contype="0" conaffinity="0"/>
+      <geom name="irv_window" type="box" pos="-0.00125 0 0" size="0.00025 0.036 0.033" material="irv_window"
+            contype="0" conaffinity="0"/>
+      <geom name="irv_led_t" type="box" pos="-0.0007 0 0.026" size="0.0003 0.024 0.003" material="irv_led" contype="0" conaffinity="0"/>
+      <geom name="irv_led_b" type="box" pos="-0.0007 0 -0.026" size="0.0003 0.024 0.003" material="irv_led" contype="0" conaffinity="0"/>
+      <geom name="irv_led_l" type="box" pos="-0.0007 0.029 0" size="0.0003 0.003 0.020" material="irv_led" contype="0" conaffinity="0"/>
+      <geom name="irv_led_r" type="box" pos="-0.0007 -0.029 0" size="0.0003 0.003 0.020" material="irv_led" contype="0" conaffinity="0"/>
+      <!-- 撮像（光学中心＝原点）。CameraSensor の mjcf_binding.camera_name = irvision_cam。近い面の切り取り 30 mm -->
+      <camera name="irvision_cam" pos="0 0 0" xyaxes="0 -1 0 0 0 1"
+              focal="0.008 0.008" sensorsize="0.0072 0.00576" resolution="1280 1024"/>
+      <site name="irvision_optical" pos="0 0 0" size="0.003" rgba="1 0 0 0.5" group="4"/>
+      <!-- 赤色 LED 照明（光軸の向きのスポットライト） -->
+      <light name="irvision_led" pos="0.001 0 0" dir="1 0 0" mode="fixed" directional="false"
+             diffuse="1.0 0.08 0.02" specular="0.1 0.01 0" ambient="0 0 0"
+             attenuation="1 0 0" cutoff="35" exponent="2" castshadow="false"/>
+    </body>
+  </worldbody>
+</mujoco>
