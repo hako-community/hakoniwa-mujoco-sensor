@@ -1,0 +1,16 @@
+{
+  "_note": [
+    "籠（Mazak 前の部品籠、devai_kago）のばら積み用の IR 材質の表。Isaac Sim では semantic のラベル名、MuJoCo では材質名で引く。",
+    "値はすべて仮定（materials.json と同じ考え方）。素材は黒皮・錆の鋼の円盤、籠は塗装した鋼の網、床はコンクリート。"
+  ],
+  "presets": {
+    "painted_steel": { "base": "ground_steel", "specular": 0.3, "texture": 0.2 }
+  },
+  "assign": {
+    "work_cast*": "cast_iron",
+    "work_*": "machined_aluminum",
+    "bin_*": "painted_steel",
+    "floor*": "concrete"
+  },
+  "default": "concrete"
+}
