@@ -1,0 +1,24 @@
+{
+  "_note": [
+    "手首の D405（V 字ハンドに付ける）の深度の誤差の設定。形・取り付けは d405_wrist_model.json。",
+    "MuJoCo では RealSenseCameraSensor が、他のシミュレーター（Isaac Sim）の理想の深度には tools/realsense_depth_offline が、同じ計算で掛ける。",
+    "深度は 1280 x 720（d405_wrist_model.json と同じ）。MinZ 7 cm になるよう視差の探索を fx B / 0.07 = 173.4 px にする。",
+    "D405 は投光なし（パッシブステレオ）：laser_power_mw 0、面の模様と工場の照明で照合する（ambient_ir 0.5 は仮定）。",
+    "深度の単位は D405 の既定の 0.1 mm（Z16 × 0.0001）。",
+    "静止して撮る前提なので、ローリングシャッター・露光・温度ドリフトは切っている（動かしながら撮るときは入れる）。"
+  ],
+  "model": "D405",
+  "frame_id": "wrist_d405",
+  "overrides": { "max_disparity_px": 173.42210061766693 },
+  "depth": { "width": 1280, "height": 720, "fps": 30, "format": "DEPTH_F32_M" },
+  "rgb": { "enabled": true, "width": 1280, "height": 720, "fps": 30, "format": "R8G8B8" },
+  "depth_model": { "enabled": true, "noise_model": "typical", "min_z_mode": "disparity", "depth_unit_m": 0.0001, "seed": 21 },
+  "rolling_shutter": { "enabled": false },
+  "edge_effects": { "enabled": true, "seed": 22 },
+  "texture_model": { "enabled": true, "materials": "materials.json", "laser_power_mw": 0, "ambient_ir": 0.5,
+                     "seed": 23 },
+  "specular_model": { "enabled": true, "seed": 24 },
+  "thermal": { "enabled": false },
+  "exposure": { "enabled": false },
+  "post_processing": { "enabled": false }
+}

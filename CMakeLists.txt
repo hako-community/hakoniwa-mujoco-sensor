@@ -181,6 +181,28 @@ target_include_directories(hako_mujoco_sensor SYSTEM PUBLIC
     ${HAKO_PDU_TYPES_INCLUDE_DIR}
 )
 
+# RealSense の深度の誤差を、他のシミュレーター（Isaac Sim など）の理想の深度画像に後から掛ける道具（MuJoCo・GL 不要）
+option(HAKO_SENSOR_BUILD_TOOLS "Build offline tools (realsense_depth_offline)" ON)
+if(HAKO_SENSOR_BUILD_TOOLS)
+    add_executable(realsense_depth_offline tools/realsense_depth_offline.cpp)
+    target_compile_features(realsense_depth_offline PRIVATE cxx_std_20)
+    target_include_directories(realsense_depth_offline PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(realsense_depth_offline SYSTEM PRIVATE ${NLOHMANN_JSON_INCLUDE_DIR})
+    if(MSVC)
+        target_compile_options(realsense_depth_offline PRIVATE /utf-8)
+    endif()
+    if(HAKO_SENSOR_BUILD_TESTS)
+        find_package(Python3 COMPONENTS Interpreter)
+        if(Python3_Interpreter_FOUND)
+            enable_testing()
+            # 平面・段差・範囲外・乱数の種（numpy が要る）
+            add_test(NAME realsense_depth_offline_test
+                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/realsense_depth_offline_test.py
+                             $<TARGET_FILE:realsense_depth_offline>)
+        endif()
+    endif()
+endif()
+
 # カメラの .cpp は GLFW/glfw3.h を include するので、glfw の include パスをターゲットから受け取る。
 #   （以前は Windows で vcpkg の MuJoCo と GLFW のヘッダが同じ include にあり、たまたま見えていた。
 #     MuJoCo を公式版に分けたら見えなくなった。Linux は /usr/include にあるので気づかない）
