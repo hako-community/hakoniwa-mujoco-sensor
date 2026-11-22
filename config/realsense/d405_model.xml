@@ -1,0 +1,34 @@
+<!--
+  RealSense D405（近距離のステレオ深度カメラ）の MJCF モデル。ロボットの手首に attach で付ける。
+  座標（本体 d405 の座標）: 原点 = 前面の中心、+x = 光軸、+y = 左、+z = 上。
+  外形 42 × 42 × 23 mm。撮像は左右に 18 mm 離れ、深度・RGB の原点は左（y = +0.009）。
+  画角は深度の 1280 × 720 で横 87°（縦はアスペクトから 56.2°）。値は config/realsense/d405_wrist_model.json と一致させる。
+  attach ではこの visual は引き継がれないので、取り込む側で offwidth ≥ 1280・offheight ≥ 720 にすること。
+-->
+<mujoco model="d405">
+  <compiler angle="radian"/>
+  <visual>
+    <global offwidth="1280" offheight="720"/>
+  </visual>
+  <asset>
+    <material name="d405_body" rgba="0.62 0.64 0.66 1" specular="0.5" shininess="0.6"/>
+    <material name="d405_glass" rgba="0.05 0.05 0.06 1" specular="0.9" shininess="0.9"/>
+    <material name="d405_lens" rgba="0.15 0.18 0.25 1" specular="0.9" shininess="0.9"/>
+  </asset>
+  <worldbody>
+    <body name="d405">
+      <inertial pos="-0.0115 0 0" mass="0.06" diaginertia="0.0000176 0.0000115 0.0000115"/>
+      <!-- 本体（前面の 1 mm はガラスの層） -->
+      <geom name="d405_body" type="box" pos="-0.012 0 0" size="0.011 0.021 0.021" material="d405_body"/>
+      <geom name="d405_glass" type="box" pos="-0.0005 0 0" size="0.0005 0.019 0.019" material="d405_glass"
+            contype="0" conaffinity="0"/>
+      <geom name="d405_lens_left" type="cylinder" pos="0.0001 0.009 0" quat="0.7071068 0 0.7071068 0" size="0.0035 0.0001"
+            material="d405_lens" contype="0" conaffinity="0"/>
+      <geom name="d405_lens_right" type="cylinder" pos="0.0001 -0.009 0" quat="0.7071068 0 0.7071068 0" size="0.0035 0.0001"
+            material="d405_lens" contype="0" conaffinity="0"/>
+      <!-- 左の撮像（深度・RGB の原点）。MuJoCo のカメラは -z を見るので +x へ向ける -->
+      <camera name="d405_left" pos="0.0002 0.009 0" xyaxes="0 -1 0 0 0 1" fovy="56.18593669" resolution="1280 720"/>
+      <site name="d405_optical" pos="0.0002 0.009 0" size="0.002" rgba="1 0 0 0.5" group="4"/>
+    </body>
+  </worldbody>
+</mujoco>

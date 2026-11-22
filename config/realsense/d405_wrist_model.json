@@ -1,0 +1,27 @@
+{
+  "model": "D405",
+  "note": "RealSense D405 の手首カメラの「形と取り付け」の正本（MJCF・USD を作る側が読む）。光学の値は include/sensors/camera/realsense/realsense_profile.hpp の FindProfile(\"D405\") と一致させる（tests/realsense_d405_model_test.cpp で確認）。深度の誤差の計算は config/realsense/d405.json と RealSenseCameraSensor が受け持つ。",
+  "realsense_model": {
+    "housing_mm": { "width": 42.0, "height": 42.0, "depth": 23.0 },
+    "mass_kg": 0.06,
+    "mass_note": "推定（公開値を確認できていない）",
+    "imagers": {
+      "baseline_mm": 18.0,
+      "left_offset_mm": 9.0,
+      "note": "深度の原点は左の撮像素子（RealSense の規約）。RGB も左の撮像素子（D405 は RGB 専用の撮像素子を持たない）"
+    },
+    "depth": {
+      "width": 1280, "height": 720,
+      "hfov_deg": 87.0, "vfov_deg_catalogue": 58.0,
+      "fx_px": 674.4192801798159,
+      "min_z_m": 0.07, "max_z_m": 0.50,
+      "max_disparity_px": 173.42210061766693,
+      "max_disparity_note": "fx × 基線 / 最短距離（7 cm）。D4 の既定 126 px だと最短が 9.6 cm になるので、カタログの 7 cm に合わせた",
+      "subpixel_rms_px": 0.08,
+      "active_projector": false
+    },
+    "frame": "原点 = 前面の中心、+x = 光軸、+y = 左、+z = 上（hakoniwa-mujoco-sensor の irvision_2d と同じ）。撮像（左）は y = +0.009"
+  },
+  "mjcf": "d405_model.xml",
+  "mjcf_binding": { "camera_name": "d405_left" }
+}
